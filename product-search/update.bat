@@ -9,8 +9,8 @@ if /i not "%~1"=="--run" (
 )
 set "APPDIR=%~f2"
 cd /d "%APPDIR%"
-set "BR=claude/excel-2an-sheet-format-svwm4c"
-set "ZIPURL=https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip"
+set "BR=main"
+set "ZIPURL=https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/main.zip"
 echo 앱 폴더: %APPDIR%
 echo.
 
@@ -19,7 +19,7 @@ git rev-parse --is-inside-work-tree >nul 2>nul || goto zip
 echo [git] 최신 버전을 받습니다...
 git fetch origin %BR% || goto fail
 git checkout %BR% || goto fail
-git pull origin %BR% || goto fail
+git pull --ff-only origin %BR% || goto fail
 goto done
 
 :zip
@@ -63,10 +63,12 @@ if not exist "%SRC%\index.html" goto zipfail
 robocopy "%SRC%" "%APPDIR%" /E /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto zipfail
 rem 통합 ZIP의 다운로드 도구도 함께 갱신 (기존 PDF와 download_log.csv는 유지)
-if not exist "%SRC%\..\hanalife-docs\hanalife_download.py" goto zipfail
-robocopy "%SRC%\..\hanalife-docs" "%APPDIR%\..\hanalife-docs" /E /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 goto zipfail
-for %%F in (start-search.bat start-sample.bat download-docs.bat README.md) do (
+for %%D in (hanalife-docs education scripts) do (
+  if not exist "%SRC%\..\%%D\" goto zipfail
+  robocopy "%SRC%\..\%%D" "%APPDIR%\..\%%D" /E /NFL /NDL /NJH /NJS /NP >nul
+  if errorlevel 8 goto zipfail
+)
+for %%F in (start-search.bat start-sample.bat download-docs.bat update.bat README.md AGENTS.md site.json) do (
   copy /y "%SRC%\..\%%F" "%APPDIR%\..\%%F" >nul
   if errorlevel 1 goto zipfail
 )

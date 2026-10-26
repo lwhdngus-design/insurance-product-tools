@@ -1,0 +1,14 @@
+{
+  "images": {
+    "count": 26,
+    "sha256": "5ae8daa37446f18e795cf5c77ce8eaa1acfe79cf8474cc53967bf18532376e3b"
+  },
+  "styles": {
+    "count": 4,
+    "sha256": "d034b9169016c0a084aa588d8c1dd470777e0a1bb15cabd3d45f102800b5c8d2"
+  },
+  "scripts": {
+    "count": 2,
+    "sha256": "65be88497d8093eed92b5788d25465942a80816bb5ce42661673f698cc963809"
+  }
+}

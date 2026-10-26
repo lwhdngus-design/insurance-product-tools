@@ -12,3 +12,6 @@ __pycache__/
 # 공시실 다운로드 결과와 로컬 로그
 product-documents/
 **/download_log.csv
+
+# GitHub Pages 생성물 (게시 워크플로에서 다시 생성)
+_site/

@@ -2,7 +2,7 @@
 
 보험 상품 기초서류 검색·분석 웹앱과 하나생명 공시실 다운로드 도구를 함께 관리합니다.
 
-저장소: [lwhdngus-design/insurance-product-tools](https://github.com/lwhdngus-design/insurance-product-tools) · [통합본 ZIP 받기](https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip)
+저장소: [lwhdngus-design/insurance-product-tools](https://github.com/lwhdngus-design/insurance-product-tools) · [통합본 ZIP 받기](https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/main.zip)
 
 ```text
 insurance-product-tools/       # 압축을 푼 폴더 이름은 달라도 됩니다.
@@ -11,8 +11,22 @@ insurance-product-tools/       # 압축을 푼 폴더 이름은 달라도 됩니
 ├─ product-documents/          # 기본 다운로드 위치 (실행 시 생성, Git 제외)
 ├─ start-search.bat            # 내 기초서류로 검색 앱 실행
 ├─ start-sample.bat            # 교육용 가상 PDF로 검색 앱 실행
-└─ download-docs.bat           # 패키지·브라우저 준비 후 공시실 다운로드
+├─ download-docs.bat           # 패키지·브라우저 준비 후 공시실 다운로드
+├─ update.bat                  # 앱·다운로드 도구·교육자료 원본 업데이트
+└─ education/index.html        # 회사 교육자료 POC 전체 HTML 원본
 ```
+
+## 같은 주소에서 갱신되는 교육자료와 웹 데모
+
+- 교육자료 POC: https://lwhdngus-design.github.io/insurance-product-tools/poc/
+- 웹 데모: https://lwhdngus-design.github.io/insurance-product-tools/demo/
+- 게시 버전: https://lwhdngus-design.github.io/insurance-product-tools/publication.json
+
+앱과 관련 교육자료를 같은 커밋으로 수정하고 GitHub에 반영하면, Actions가 둘을 함께 검증·게시합니다. 교육자료의 시연 링크도 같은 데모를 가리킵니다. 자동 게시가 설명문이나 캡처를 스스로 다시 작성하는 것은 아니며, 앞으로의 작업에서는 `AGENTS.md`에 따라 관련 교육자료도 함께 수정합니다. 기존 Claude 게시본은 별도 사본으로 유지합니다.
+
+PC는 인터넷 연결 후 최상위 `update.bat` 또는 기존 `product-search\update.bat`을 실행할 때 갱신됩니다. GitHub 변경이 PC에 원격으로 즉시 적용되는 방식은 아닙니다. 최초 전환에는 최신 통합 ZIP을 새 폴더에 풀어 사용하세요.
+
+관리·게시·문제 해결: [게시 안내](docs/PUBLISHING.md).
 
 ## Windows에서 사용하기
 

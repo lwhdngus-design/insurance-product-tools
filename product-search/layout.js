@@ -2,7 +2,7 @@
 // 상품 목록 판매상태 탭, 기초서류 연결 현황, 교육용 자료 내려받기
 
 // 앱 버전 (업데이트가 반영됐는지 기초서류 연결 화면에서 확인)
-const APP_VERSION = "2026-10-26 · 상품 검색·공시실 다운로드 통합 · 교육용 실습 주소·실행 안내 갱신";
+const APP_VERSION = "2026-10-26 · 앱·교육자료·웹 데모 통합 게시 · PC 업데이트 안내";
 $("appVersion").textContent = APP_VERSION;
 
 // ---------- 화면 전환 ----------
@@ -74,6 +74,7 @@ new MutationObserver(() => { if (curView === "connect") renderConnectStats(); re
 // ---------- 교육용 실습 ----------
 const SAMPLE_FOLDER = "sample-기초서류폴더";
 const SAMPLE_LIST = window.SAMPLE_FILES || [];
+const usesArtifactDownloads = () => Boolean(window.claude && typeof window.claude.use === "function");
 
 function renderEduInfo() {
   $("sampleCount").textContent = SAMPLE_LIST.length ? `(PDF ${SAMPLE_LIST.length}개)` : "";
@@ -81,7 +82,7 @@ function renderEduInfo() {
   $("sampleModeNote").innerHTML = folder.replace(/\\/g, "/").endsWith(SAMPLE_FOLDER)
     ? `<b class="ok-text">지금 가상 샘플로 실행 중입니다.</b> 상단 [기초서류 검색]·[상품 목록]에서 바로 실습하세요.`
     : SERVER_MODE ? `지금은 내 기초서류 폴더로 실행 중입니다${folder ? ` (${esc(folder)})` : ""}.` : "";
-  if (DEMO_MODE) $("sampleZipNote").textContent = "웹 데모에서는 저장이 막혀 있음";
+  if (DEMO_MODE) $("sampleZipNote").textContent = usesArtifactDownloads() ? "이 게시 환경에서는 샘플 ZIP 저장이 제한됩니다" : "가상 샘플 PDF를 ZIP으로 내려받을 수 있습니다";
   if (DEMO_MODE) document.querySelectorAll(".demo-only").forEach(el => { el.hidden = false; });
   if (DEMO_MODE) $("sampleModeNote").innerHTML = `<b class="ok-text">지금 웹 데모로 실행 중입니다.</b> 가상 샘플이 이미 연결되어 있어 상단 [기초서류 검색]·[상품 목록]에서 바로 실습할 수 있습니다.`;
   if (!SERVER_MODE && !DEMO_MODE) $("sampleZipNote").textContent = "start.bat / start-sample.bat으로 실행했을 때 내려받을 수 있습니다";
@@ -130,8 +131,8 @@ function makeZip(entries) {
 
 $("sampleZipBtn").addEventListener("click", async () => {
   const btn = $("sampleZipBtn"), note = $("sampleZipNote");
-  if (DEMO_MODE) { demoNotice("웹 데모에서는 파일 저장이 막혀 있습니다. 앱 폴더의 sample-기초서류폴더에 같은 PDF가 들어 있습니다."); return; }
-  if (!SERVER_MODE) { note.textContent = "start.bat / start-sample.bat으로 실행했을 때 내려받을 수 있습니다"; return; }
+  if (DEMO_MODE && usesArtifactDownloads()) { demoNotice("이 게시 환경에서는 샘플 ZIP 저장이 제한됩니다. 통합 앱을 받아 sample-기초서류폴더를 사용하세요."); return; }
+  if (!SERVER_MODE && !DEMO_MODE) { note.textContent = "start.bat / start-sample.bat으로 실행했을 때 내려받을 수 있습니다"; return; }
   btn.disabled = true;
   try {
     const entries = [];
@@ -211,9 +212,10 @@ if (DEMO_MODE) {
   document.querySelector(".util").insertAdjacentHTML("beforeend", `<span class="hl">웹 데모 · 가상 데이터</span>`);
   // compare.js의 download(엑셀·CSV 저장)를 안내로 바꿈
   // 웹 데모(claude.ai)에서는 일반 내려받기 링크가 막혀 있어, 보는 사람이 확인하는 저장 창(downloads)으로 저장
+  const nativeDownload = download;
   const demoSave = async (name, data) => {
     const dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null;
-    if (!dl) { demoNotice(`웹 데모에서는 파일 저장(${name})이 막혀 있습니다. 내 PC에서 start-sample.bat으로 실행한 앱에서 저장할 수 있습니다.`); return; }
+    if (!dl) { nativeDownload(name, data); return; }
     try { await dl.save({ filename: name, data }); } catch (err) {
       if (err && err.code !== "declined") demoNotice(`저장하지 못했습니다(${err.code || err.message}). 깃허브 링크에서 받아 주세요.`);
     }
