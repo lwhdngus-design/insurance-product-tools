@@ -691,25 +691,44 @@ python hanalife_download.py                ← 판매 + 판매중지 전체</pre
     <li>
       <div class="proc-no">STEP 1</div>
       <div class="proc-body">
-        <h2>앱 받기</h2>
-        <p>아래 <b>ZIP 바로 받기</b>를 눌러 내려받고 압축을 푼 뒤, 안의 <b>product-search</b> 폴더에서 <b>start-sample.bat</b>(가상 샘플) 또는 <b>start.bat</b>(내 기초서류 폴더)을 실행합니다.
-          이미 받았다면 <b>update.bat</b>으로 최신 버전을 받습니다(화면이 그대로면 Ctrl+F5).</p>
+        <h2>통합 앱 받기</h2>
+        <p><b>Insurance Product Tools</b>에는 상품 검색·분석 앱과 하나생명 공시실 다운로드 도구가 함께 들어 있습니다.
+          아래 <b>ZIP 바로 받기</b>로 내려받아 압축을 풀고, 최상위 폴더의 실행파일을 사용하세요.</p>
+        <p class="note">교육 안내 갱신: 2026-10-26 · 저장소와 실행 경로를 통합본 기준으로 안내합니다.</p>
         <div class="dl-links">
           <a class="btnlink primary" href="https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip" target="_blank" rel="noopener">ZIP 바로 받기</a>
           <a class="btnlink" href="https://github.com/lwhdngus-design/insurance-product-tools/tree/claude/excel-2an-sheet-format-svwm4c/product-search" target="_blank" rel="noopener">깃허브에서 보기</a>
         </div>
         <p class="note">링크가 열리지 않으면 주소를 복사해 새 탭에서 여세요.<br>
           ZIP: <code class="url">https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip</code><br>깃허브: <code class="url">https://github.com/lwhdngus-design/insurance-product-tools/tree/claude/excel-2an-sheet-format-svwm4c/product-search</code></p>
+        <div class="dl-links">
+          <a class="btnlink" href="https://github.com/lwhdngus-design/insurance-product-tools" target="_blank" rel="noopener">통합 저장소</a>
+          <a class="btnlink" href="https://github.com/lwhdngus-design/insurance-product-tools/tree/claude/excel-2an-sheet-format-svwm4c/hanalife-docs" target="_blank" rel="noopener">공시실 다운로드 도구 보기</a>
+        </div>
+<pre class="tree">insurance-product-tools/
+├─ product-search/         ← 상품 검색·분석 앱
+├─ hanalife-docs/          ← 하나생명 공시실 다운로드 도구
+├─ product-documents/      ← 기본 다운로드 위치 (실행 시 생성)
+├─ start-sample.bat        ← 교육용 가상 샘플 실행
+├─ start-search.bat        ← 내 기초서류로 검색·분석
+└─ download-docs.bat       ← 공시실 서류 다운로드</pre>
+        <p class="note">ZIP을 풀면 폴더 이름에 브랜치명이 붙을 수 있습니다. 실행파일이 있는 최상위 폴더에서 시작하면 됩니다.
+          상품 검색 상세 사용법은 <code>product-search/README.md</code>, 다운로드 사용법은 <code>hanalife-docs/README.md</code>에 있습니다.</p>
+        <p><b>이전 버전에서 옮기기:</b> 기존 <code>poc-2an</code>은 <code>product-search</code>로 바뀌었고, <code>261014</code>의 다운로드 도구는 <code>hanalife-docs</code>에 포함되었습니다.
+          이전 ZIP 버전은 통합본을 새 폴더에 풀어 사용하세요. 필요하면 예전 폴더의 <code>docs-folder.txt</code>와 <code>.docs-cache</code>를 새 <code>product-search</code>에 복사해 연결 설정과 색인을 유지할 수 있습니다.</p>
+        <p><b>이후 업데이트:</b> <code>product-search\update.bat</code> 실행 → 앱을 다시 열고 Ctrl+F5로 새로고침합니다. ZIP 방식은 검색 앱과 다운로드 도구를 함께 갱신합니다.</p>
         <p>Git이 설치되어 있으면 명령 프롬프트에서 받을 수도 있습니다.</p>
         <pre class="cmd">git clone -b claude/excel-2an-sheet-format-svwm4c https://github.com/lwhdngus-design/insurance-product-tools.git</pre>
-        <p class="note">필요한 프로그램: Python 3 (추가 설치 패키지 없음, 설치 때 "Add Python to PATH" 체크), Chrome 권장</p>
+        <p class="note">필요한 프로그램: Python 3.9 이상(설치 때 "Add Python to PATH" 체크), Chrome 또는 Edge.
+          검색 앱은 추가 Python 패키지 없이 실행되고, 공시실 다운로드 도구는 Playwright 설치가 필요합니다(<code>download-docs.bat</code>에서 준비).
+          로컬 AI(Ollama)는 선택 사항이며, 설치하지 않으면 질문을 규칙으로 해석합니다.</p>
       </div>
     </li>
     <li>
       <div class="proc-no">STEP 2</div>
       <div class="proc-body">
         <h2>교육용 자료 내려받기</h2>
-        <table class="dl"><thead><tr><th>자료</th><th>내용</th><th>내려받기</th></tr></thead><tbody>
+        <div class="table-scroll"><table class="dl"><thead><tr><th>자료</th><th>내용</th><th>내려받기</th></tr></thead><tbody>
           <tr><td>가상 기초서류 PDF</td><td>가나다생명 20개 상품(판매중·판매중지 폴더 포함) · 판매일자별 사업방법서·상품요약서·약관 <span id="sampleCount"></span></td>
             <td><button type="button" class="mini" id="sampleZipBtn">ZIP 내려받기</button><div class="note" id="sampleZipNote"></div></td></tr>
           <tr><td>가상 상품 DB</td><td>상품 목록 (상품코드·판매기간·개정차수·예정이율 등)</td><td><button type="button" class="mini" data-csv="products">products.csv</button></td></tr>
@@ -717,15 +736,27 @@ python hanalife_download.py                ← 판매 + 판매중지 전체</pre
           <tr><td></td><td>상품위원회 등 심의 문서</td><td><button type="button" class="mini" data-csv="documents">documents.csv</button></td></tr>
           <tr><td></td><td>월별 보유계약 현황</td><td><button type="button" class="mini" data-csv="portfolio">portfolio.csv</button></td></tr>
           <tr><td>특징 사전</td><td>질문 검색·특징 판정 규칙 (한 줄 = 특징 하나)</td><td><button type="button" class="mini" data-csv="features">features.csv</button></td></tr>
-        </tbody></table>
+        </tbody></table></div>
         <p class="note">같은 자료가 앱 폴더 안 <b>sample-기초서류폴더</b>, <b>dummy-data</b>에도 들어 있습니다. CSV는 엑셀에서 바로 열립니다.</p>
       </div>
     </li>
     <li>
       <div class="proc-no">STEP 3</div>
       <div class="proc-body">
-        <h2>샘플로 실행</h2>
-        <p><b>start-sample.bat</b> 더블클릭 → 가상 기초서류로 앱이 열립니다. 내 기초서류 폴더 설정은 바뀌지 않으며, 회사 문서로 돌아갈 때는 <b>start.bat</b>으로 실행합니다.</p>
+        <h2>샘플로 실행 · 내 서류 연결</h2>
+        <p>최상위 폴더의 <b>start-sample.bat</b> 더블클릭 → 가상 상품 20개·PDF 82개로 앱이 열립니다. 내 기초서류 폴더 설정은 바뀌지 않습니다.</p>
+        <div class="table-scroll"><table class="dl"><thead><tr><th>하고 싶은 일</th><th>최상위 폴더에서 실행할 파일</th></tr></thead><tbody>
+          <tr><td>가상 샘플로 실습</td><td><code>start-sample.bat</code></td></tr>
+          <tr><td>공시실 서류 다운로드</td><td><code>download-docs.bat</code> (인터넷 필요)</td></tr>
+          <tr><td>내 기초서류로 검색·분석</td><td><code>start-search.bat</code></td></tr>
+        </tbody></table></div>
+        <p><b>내 서류로 바꾸기:</b> <code>start-search.bat</code>을 실행하고 기초서류 폴더를 지정합니다.
+          이미 연결된 폴더를 바꾸려면 <code>product-search\change-folder.bat</code>을 실행하세요.
+          앱 폴더 안의 기존 실행파일 <code>product-search\start.bat</code>도 사용할 수 있습니다.</p>
+        <p><b>다운로드한 서류 연결:</b> 기본 저장 위치는 <code>product-documents</code>입니다.
+          이전 서류를 이어받을 때는 <code>hanalife-docs</code> 폴더에서 <code>python hanalife_download.py --out "기존 저장 폴더"</code>로 실행하고,
+          기존 PDF와 <code>download_log.csv</code>를 유지하세요.</p>
+        <div class="dl-links"><a class="btnlink" href="#downloadGuide" data-view="connect" data-target="downloadGuide">공시실 다운로드 · 연결 방법</a></div>
         <p class="note" id="sampleModeNote"></p>
       </div>
     </li>
