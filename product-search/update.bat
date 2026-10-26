@@ -3,8 +3,8 @@ chcp 65001 >nul
 rem 최신 버전 받기: git으로 받은 폴더는 git pull, ZIP으로 받은 폴더는 최신 ZIP을 받아 덮어씀
 rem (자기 자신도 덮어쓰므로 임시 폴더에 복사본을 만들어 그것으로 실행)
 if /i not "%~1"=="--run" (
-  copy /y "%~f0" "%TEMP%\poc2an_update.bat" >nul
-  "%TEMP%\poc2an_update.bat" --run "%~dp0."
+  copy /y "%~f0" "%TEMP%\insurance_product_tools_update.bat" >nul
+  "%TEMP%\insurance_product_tools_update.bat" --run "%~dp0."
   exit /b
 )
 set "APPDIR=%~f2"
@@ -25,7 +25,7 @@ goto done
 :zip
 echo [ZIP] git으로 받은 폴더가 아니어서 최신 ZIP을 내려받아 덮어씁니다.
 echo       폴더 설정(docs-folder.txt)과 검색 색인(.docs-cache)은 그대로 둡니다.
-set "TMPD=%TEMP%\poc2an_update"
+set "TMPD=%TEMP%\insurance_product_tools_update"
 if exist "%TMPD%" rmdir /s /q "%TMPD%"
 mkdir "%TMPD%"
 set "ZIPFILE=%TMPD%\app.zip"
@@ -35,7 +35,7 @@ powershell -NoProfile -Command "$ErrorActionPreference='Stop'; [Net.ServicePoint
 if not errorlevel 1 goto unzip
 echo  - 받기 2/3: curl
 where curl.exe >nul 2>nul || goto bits
-curl.exe -fsSL --ssl-no-revoke -o "%ZIPFILE%" "%ZIPURL%" >nul 2>nul
+curl.exe -fsSL -o "%ZIPFILE%" "%ZIPURL%" >nul 2>nul
 if not errorlevel 1 goto unzip
 :bits
 echo  - 받기 3/3: BITS
@@ -49,7 +49,7 @@ echo        크롬으로 최신 ZIP을 엽니다. 다운로드가 끝나면 이 
 start "" "%ZIPURL%"
 pause
 set "ZIPFILE="
-for /f "usebackq delims=" %%F in (`powershell -NoProfile -Command "$d=(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path; if(-not $d){$d=Join-Path $env:USERPROFILE 'Downloads'}; Get-ChildItem -LiteralPath $d -Filter '261007-*.zip' -ErrorAction SilentlyContinue ^| Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-3) } ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1 -ExpandProperty FullName"`) do set "ZIPFILE=%%F"
+for /f "usebackq delims=" %%F in (`powershell -NoProfile -Command "$d=(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path; if(-not $d){$d=Join-Path $env:USERPROFILE 'Downloads'}; Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue ^| Where-Object { $_.Name -like '261007-*.zip' -or $_.Name -like 'insurance-product-tools-*.zip' } ^| Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-3) } ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1 -ExpandProperty FullName"`) do set "ZIPFILE=%%F"
 if not defined ZIPFILE goto zipfail
 echo  - 다운로드 폴더의 ZIP 사용: %ZIPFILE%
 
@@ -57,11 +57,19 @@ echo  - 다운로드 폴더의 ZIP 사용: %ZIPFILE%
 powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Expand-Archive -Force -LiteralPath '%ZIPFILE%' -DestinationPath '%TMPD%\x'"
 if errorlevel 1 goto zipfail
 set "SRC="
-for /d %%D in ("%TMPD%\x\*") do set "SRC=%%D\poc-2an"
+for /d %%D in ("%TMPD%\x\*") do set "SRC=%%D\product-search"
 if not defined SRC goto zipfail
 if not exist "%SRC%\index.html" goto zipfail
 robocopy "%SRC%" "%APPDIR%" /E /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto zipfail
+rem 통합 ZIP의 다운로드 도구도 함께 갱신 (기존 PDF와 download_log.csv는 유지)
+if not exist "%SRC%\..\hanalife-docs\hanalife_download.py" goto zipfail
+robocopy "%SRC%\..\hanalife-docs" "%APPDIR%\..\hanalife-docs" /E /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto zipfail
+for %%F in (start-search.bat start-sample.bat download-docs.bat README.md) do (
+  copy /y "%SRC%\..\%%F" "%APPDIR%\..\%%F" >nul
+  if errorlevel 1 goto zipfail
+)
 rmdir /s /q "%TMPD%"
 goto done
 
@@ -70,7 +78,7 @@ echo.
 echo [업데이트 못 함] 최신 ZIP을 받지 못했거나 다운로드 폴더에서 찾지 못했습니다.
 echo  1) 크롬 주소창에 아래 주소를 넣어 최신 ZIP을 받습니다.
 echo     %ZIPURL%
-echo  2) 압축을 풀고, 안의 poc-2an 폴더 내용을 지금 이 poc-2an 폴더에 모두 덮어씁니다.
+echo  2) 압축을 풀고 product-search와 hanalife-docs 폴더를 통합 폴더에 덮어씁니다. 설정과 다운로드 결과는 유지하세요.
 echo  3) 검은 창을 모두 닫고 start.bat 으로 다시 실행합니다.
 goto end
 

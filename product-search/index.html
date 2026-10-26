@@ -611,8 +611,8 @@
         <div class="proc-no">STEP 1</div>
         <div class="proc-body">
           <h2>다운로드 도구 받기</h2>
-          <p>크롬에서 아래 주소로 ZIP을 받아 압축을 풀고, 안의 <b>261013\hanalife_docs</b> 폴더를 엽니다.</p>
-          <pre class="cmd">https://github.com/lwhdngus-design/261014/archive/refs/heads/claude/hanalife-product-docs-download-089p7m.zip</pre>
+          <p>크롬에서 아래 주소로 ZIP을 받아 압축을 풀고, 안의 <b>hanalife-docs</b> 폴더를 엽니다. 이미 통합본을 받았다면 같은 폴더 안에 다운로드 도구가 들어 있습니다.</p>
+          <pre class="cmd">https://github.com/lwhdngus-design/261007/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip</pre>
           <table class="dl"><thead><tr><th>파일</th><th>설명</th></tr></thead><tbody>
             <tr><td>run_download.bat</td><td>더블클릭 실행 — 패키지 설치 → 브라우저 준비 → 다운로드를 한 번에</td></tr>
             <tr><td>hanalife_download.py</td><td>다운로드 프로그램 (Python · Playwright)</td></tr>
@@ -630,7 +630,7 @@ python hanalife_download.py --limit 3      ← 시험 (페이지당 3개 상품)
 python hanalife_download.py                ← 판매 + 판매중지 전체</pre>
           <table class="dl"><thead><tr><th>옵션</th><th>설명</th></tr></thead><tbody>
             <tr><td>--status on / off</td><td>판매상품만 / 판매중지상품만</td></tr>
-            <tr><td>--out "폴더 경로"</td><td>저장 위치 지정 (교육장 등 다른 PC는 사용자 폴더 이름이 다르므로 지정 권장)</td></tr>
+            <tr><td>--out "폴더 경로"</td><td>저장 위치 지정 (기본: 통합 폴더의 product-documents, 이전 다운로드를 이어받을 때는 기존 폴더 지정)</td></tr>
             <tr><td>--headed</td><td>브라우저 창을 보면서 실행</td></tr>
             <tr><td>--chrome "실행파일 경로"</td><td>크롬·엣지를 자동으로 못 찾을 때 직접 지정 (설치된 크롬 → 엣지 순으로 자동 탐색)</td></tr>
           </tbody></table>
@@ -681,25 +681,25 @@ python hanalife_download.py                ← 판매 + 판매중지 전체</pre
         <p>앱의 핵심 로직(Main Logic)을 수정·요약 없이 그대로 모은 텍스트 파일입니다. 화면 디자인/스타일 코드와 기능 설명은 빠져 있고, 인증정보(API 키·비밀번호)는 없습니다.</p>
         <div class="dl-links">
           <a class="btnlink primary" href="main-logic.txt" download>main-logic.txt 내려받기</a>
-          <a class="btnlink" href="https://github.com/lwhdngus-design/261007/blob/claude/excel-2an-sheet-format-svwm4c/poc-2an/main-logic.txt" target="_blank" rel="noopener">깃허브에서 보기</a>
+          <a class="btnlink" href="https://github.com/lwhdngus-design/261007/blob/claude/excel-2an-sheet-format-svwm4c/product-search/main-logic.txt" target="_blank" rel="noopener">깃허브에서 보기</a>
         </div>
         <p class="note">포함: serve.py · build-data.py · index.html(스크립트만) · pdf-docs.js · question.js · analysis.js · compare.js · catalog.js · product-db.js · chat.js
           — 앱 폴더에서 <code>python export-logic.py</code>를 실행하면 최신 코드로 다시 만들어집니다.</p>
-        <p class="note demo-only" hidden>웹 데모에서 내려받기가 막히면 아래 주소를 복사해 새 탭에서 여세요(깃허브 화면 오른쪽 위 내려받기 버튼).<br><code class="url">https://github.com/lwhdngus-design/261007/blob/claude/excel-2an-sheet-format-svwm4c/poc-2an/main-logic.txt</code></p>
+        <p class="note demo-only" hidden>웹 데모에서 내려받기가 막히면 아래 주소를 복사해 새 탭에서 여세요(깃허브 화면 오른쪽 위 내려받기 버튼).<br><code class="url">https://github.com/lwhdngus-design/261007/blob/claude/excel-2an-sheet-format-svwm4c/product-search/main-logic.txt</code></p>
       </div>
     </li>
     <li>
       <div class="proc-no">STEP 1</div>
       <div class="proc-body">
         <h2>앱 받기</h2>
-        <p>아래 <b>ZIP 바로 받기</b>를 눌러 내려받고 압축을 푼 뒤, 안의 <b>poc-2an</b> 폴더에서 <b>start-sample.bat</b>(가상 샘플) 또는 <b>start.bat</b>(내 기초서류 폴더)을 실행합니다.
+        <p>아래 <b>ZIP 바로 받기</b>를 눌러 내려받고 압축을 푼 뒤, 안의 <b>product-search</b> 폴더에서 <b>start-sample.bat</b>(가상 샘플) 또는 <b>start.bat</b>(내 기초서류 폴더)을 실행합니다.
           이미 받았다면 <b>update.bat</b>으로 최신 버전을 받습니다(화면이 그대로면 Ctrl+F5).</p>
         <div class="dl-links">
           <a class="btnlink primary" href="https://github.com/lwhdngus-design/261007/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip" target="_blank" rel="noopener">ZIP 바로 받기</a>
-          <a class="btnlink" href="https://github.com/lwhdngus-design/261007/tree/claude/excel-2an-sheet-format-svwm4c/poc-2an" target="_blank" rel="noopener">깃허브에서 보기</a>
+          <a class="btnlink" href="https://github.com/lwhdngus-design/261007/tree/claude/excel-2an-sheet-format-svwm4c/product-search" target="_blank" rel="noopener">깃허브에서 보기</a>
         </div>
         <p class="note">링크가 열리지 않으면 주소를 복사해 새 탭에서 여세요.<br>
-          ZIP: <code class="url">https://github.com/lwhdngus-design/261007/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip</code><br>깃허브: <code class="url">https://github.com/lwhdngus-design/261007/tree/claude/excel-2an-sheet-format-svwm4c/poc-2an</code></p>
+          ZIP: <code class="url">https://github.com/lwhdngus-design/261007/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip</code><br>깃허브: <code class="url">https://github.com/lwhdngus-design/261007/tree/claude/excel-2an-sheet-format-svwm4c/product-search</code></p>
         <p>Git이 설치되어 있으면 명령 프롬프트에서 받을 수도 있습니다.</p>
         <pre class="cmd">git clone -b claude/excel-2an-sheet-format-svwm4c https://github.com/lwhdngus-design/261007.git</pre>
         <p class="note">필요한 프로그램: Python 3 (추가 설치 패키지 없음, 설치 때 "Add Python to PATH" 체크), Chrome 권장</p>

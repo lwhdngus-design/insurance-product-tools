@@ -50,7 +50,7 @@ def norm(s):
 def ask_folder():
     while True:
         raw = input("기초서류 PDF 폴더 경로를 붙여넣고 Enter\n"
-                    "(탐색기에서 기초서류 폴더를 열고 주소창 경로를 복사. 예: C:\\Users\\user\\Desktop\\App_261014\\doc_sample)\n> ")
+                    "(탐색기에서 기초서류 폴더를 열고 주소창 경로를 복사. 예: C:\\Users\\user\\Desktop\\insurance-product-tools\\doc_sample)\n> ")
         p = Path(raw.strip().strip('"'))
         if p.is_dir():
             return p

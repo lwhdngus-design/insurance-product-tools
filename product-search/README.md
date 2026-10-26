@@ -275,7 +275,7 @@ dummy-data 폴더의 products.csv, coverages.csv, documents.csv, portfolio.csv �
 ## 7. 교육 당일 Claude Code 시작 프롬프트 (복사해서 사용)
 
 ```
-너는 웹앱 개발자야. poc-2an/dummy-data 폴더의 CSV 4개(products, coverages, portfolio, documents)를 사용해서
+너는 웹앱 개발자야. product-search/dummy-data 폴더의 CSV 4개(products, coverages, portfolio, documents)를 사용해서
 "상품 검증 기준자료 통합 검색" 웹앱을 만들어줘. 가장 단순한 구조(단일 index.html + JS, 서버 없이 실행)로 해줘.
 
 [화면]
@@ -360,13 +360,13 @@ dummy-data 폴더의 products.csv, coverages.csv, documents.csv, portfolio.csv �
 
 창을 닫을 때마다 폴더를 다시 고르지 않도록, **파이썬 로컬 실행기**로 지정 폴더를 자동 연결합니다. 추가 설치(pip) 없음.
 
-1. `poc-2an\start.bat` 더블클릭
+1. `product-search\start.bat` 더블클릭
 2. **처음 한 번만** 검은 창에 기초서류 폴더 경로를 붙여넣고 Enter
-   (예: `C:\Users\user\Desktop\App_261014\doc_sample_2026\2026`) → `docs-folder.txt`에 저장
+   (예: `C:\Users\user\Desktop\insurance-product-tools\doc_sample_2026\2026`) → `docs-folder.txt`에 저장
 3. 브라우저가 `http://127.0.0.1:8765` 로 열리고 폴더를 자동으로 읽습니다.
 4. 다음부터는 `start.bat`만 실행 → 바로 검색 (검은 창을 닫으면 앱 종료)
 
-- **검색 색인**: PDF에서 읽은 글자를 `poc-2an\.docs-cache\index.db`(SQLite)에 저장 → 다음 실행부터는 **새로 추가·수정된 파일만** 다시 읽고, 삭제된 파일은 색인에서 자동으로 뺍니다.
+- **검색 색인**: PDF에서 읽은 글자를 `product-search\.docs-cache\index.db`(SQLite)에 저장 → 다음 실행부터는 **새로 추가·수정된 파일만** 다시 읽고, 삭제된 파일은 색인에서 자동으로 뺍니다.
   초기화하려면 `.docs-cache` 폴더 삭제. (자세한 내용은 11장)
 - **폴더 추가·변경 반영**: 실행 중 PDF를 넣었다면 앱의 [새로고침] 버튼. 다른 폴더로 바꾸려면 `python serve.py --folder "C:\새\폴더"`
 - **보안**: 이 PC(127.0.0.1)에서만 접속되고 외부로 전송하지 않습니다. 지정 폴더 밖의 파일은 열 수 없습니다.
@@ -526,7 +526,7 @@ dummy-data 폴더의 products.csv, coverages.csv, documents.csv, portfolio.csv �
 ## 19. 공시실 서류 내려받기 (기초서류 연결 화면 안내)
 
 - 상단 **기초서류 연결** 화면 아래에 하나생명 공시실 "전체상품 목록" 일괄 다운로드 도구 사용법(STEP 1~4)을 넣었습니다.
-- 도구 자체는 별도 저장소(`lwhdngus-design/261014`, 브랜치 `claude/hanalife-product-docs-download-089p7m`, 폴더 `261013/hanalife_docs`)에 있습니다. 앱은 외부로 아무것도 보내지 않으며, 다운로드는 그 도구를 내 PC에서 직접 실행할 때만 일어납니다.
+- 다운로드 도구는 같은 저장소의 `hanalife-docs/` 폴더에 통합되어 있습니다. 상위 폴더의 `download-docs.bat` 또는 도구 폴더의 `run_download.bat`으로 실행합니다. 앱은 외부로 아무것도 보내지 않으며, 다운로드는 그 도구를 내 PC에서 직접 실행할 때만 일어납니다.
 - 도구가 만드는 `연도/판매일자/상품명/[서류종류] 원본파일명.pdf` 구조를 그대로 읽습니다. 파일명에 상품명이 없으면(코드·번호뿐) **상품명 폴더**를 상품명으로 씁니다.
 
 ## 20. 가상 상품 DB 상세 · 웹 데모
@@ -558,7 +558,7 @@ dummy-data 폴더의 products.csv, coverages.csv, documents.csv, portfolio.csv �
 - 판매여부 폴더가 없으면 지금처럼 판매일자로 추정하고, 상품 목록 상태 옆에 '추정'을 붙입니다. 검색 조건의 판매상태·상품 목록 탭·엑셀(CSV, "판매상태 근거" 열)이 모두 같은 기준을 씁니다.
 - 판매일자별로 펼치기: 최신 판매일자 줄 아래에 "└ 이전 판매일자" 줄이 차례로 나오고, 상품이 바뀌는 곳은 굵은 선으로 구분합니다.
 - 판매중 → 판매중지로 바뀐 상품이 두 폴더에 모두 있으면(같은 상품·판매일자·문서유형) 판매중지 쪽만 남기고, 연결 상태에 "판매중지로 옮겨진 중복 n개 제외"를 표시합니다.
-- 다운로드 도구(261014 저장소)도 같은 기준으로 바뀌었습니다: 다시 실행하면 새 서류만 받고, 판매중지로 바뀐 상품은 다시 받지 않고 `판매중` → `판매중지` 폴더로 옮깁니다. 앱은 옮겨진 폴더 기준으로 판매상태를 표시합니다.
+- 함께 포함된 다운로드 도구(`hanalife-docs`)도 같은 기준으로 바뀌었습니다: 다시 실행하면 새 서류만 받고, 판매중지로 바뀐 상품은 다시 받지 않고 `판매중` → `판매중지` 폴더로 옮깁니다. 앱은 옮겨진 폴더 기준으로 판매상태를 표시합니다.
 
 ## 25. 기초서류 링크 · 문서유형 검색 · 검색 결과 쪽 나누기 · 분석/비교 화면 분리
 
