@@ -2,6 +2,8 @@
 
 보험 상품 기초서류 검색·분석 웹앱과 하나생명 공시실 다운로드 도구를 함께 관리합니다.
 
+저장소: [lwhdngus-design/insurance-product-tools](https://github.com/lwhdngus-design/insurance-product-tools) · [통합본 ZIP 받기](https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip)
+
 ```text
 insurance-product-tools/       # 압축을 푼 폴더 이름은 달라도 됩니다.
 ├─ product-search/             # 기존 poc-2an: PDF 검색, 상품 분석·비교, 로컬 AI 질문

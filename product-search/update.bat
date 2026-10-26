@@ -10,7 +10,7 @@ if /i not "%~1"=="--run" (
 set "APPDIR=%~f2"
 cd /d "%APPDIR%"
 set "BR=claude/excel-2an-sheet-format-svwm4c"
-set "ZIPURL=https://github.com/lwhdngus-design/261007/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip"
+set "ZIPURL=https://github.com/lwhdngus-design/insurance-product-tools/archive/refs/heads/claude/excel-2an-sheet-format-svwm4c.zip"
 echo 앱 폴더: %APPDIR%
 echo.
 
