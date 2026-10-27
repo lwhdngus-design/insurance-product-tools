@@ -396,14 +396,19 @@ def near_words(ids, words, after=80, per_doc=8, per_page=3):
     return out
 
 
-def pages_with(ids, words, limit=20000):
+def pages_with(ids, words, limit=20000, neighbors=0, match_any=False):
     """단어가 모두 들어 있는 페이지 원문 — AI 질문의 구조 판정(예: 사망보험금 기간별 차등)용"""
     words = [norm(w) for w in words if norm(w)]
     if not words or not ids:
         return []
-    cond = " AND ".join(f"instr({SQL_NORM}, ?) > 0" for _ in words)
-    sql = (f"SELECT doc_id, page_no, text FROM pages WHERE doc_id IN (SELECT value FROM json_each(?)) "
-           f"AND {cond} ORDER BY doc_id, page_no LIMIT {int(limit)}")
+    cond = (" OR " if match_any is True else " AND ").join(f"instr({SQL_NORM}, ?) > 0" for _ in words)
+    # 이율 표의 제목과 다음 쪽의 기간 구간을 함께 읽을 수 있게 동일 문서의 이웃 쪽만 포함.
+    distance = 1 if neighbors == 1 else 0
+    sql = (f"WITH hits AS MATERIALIZED (SELECT doc_id, page_no FROM pages "
+           f"WHERE doc_id IN (SELECT value FROM json_each(?)) AND ({cond})) "
+           f"SELECT DISTINCT p.doc_id, p.page_no, p.text FROM hits h JOIN pages p "
+           f"ON h.doc_id=p.doc_id AND p.page_no BETWEEN h.page_no-{distance} AND h.page_no+{distance} "
+           f"ORDER BY p.doc_id, p.page_no LIMIT {int(limit)}")
     with connect() as c:
         return [{"id": d, "page": p, "text": t} for d, p, t in c.execute(sql, [json.dumps([int(i) for i in ids])] + words)]
 
@@ -522,7 +527,7 @@ def make_handler(root):
                 if path == "/api/near":
                     return self.send_json({"hits": near_words(body.get("ids", []), body.get("words", []), body.get("after", 80))})
                 if path == "/api/pages_with":
-                    return self.send_json({"pages": pages_with(body.get("ids", []), body.get("words", []))})
+                    return self.send_json({"pages": pages_with(body.get("ids", []), body.get("words", []), neighbors=body.get("neighbors", 0), match_any=body.get("match_any", False))})
                 if path == "/api/ai/chat":
                     return self.send_json(ai_chat(body))
                 if path == "/api/snippets":

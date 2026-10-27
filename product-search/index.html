@@ -533,6 +533,7 @@
   <h1 class="page-title">AI 질문</h1>
   <p class="page-desc">연결된 기초서류에 대해 자유롭게 물어보세요. 질문 해석과 답변 문장은 <b>내 PC의 로컬 AI</b>가 하고,
     개수·평균 같은 <b>숫자는 앱이 직접 계산</b>합니다. 외부로 아무것도 보내지 않습니다.</p>
+  <p class="note">기간별 이율은 “적용이율을 보험기간별로 별도 적용하는 상품”처럼 질문하세요. 적용이율과 최저보증이율을 구분해 기간 구간·이율의 원문과 쪽수를 찾습니다. 예시로 적은 숫자는 특정 이율 조건으로 제한하지 않습니다.</p>
   <div class="ai-status" id="aiStatus"></div>
   <div class="ai-examples" id="aiExamples"></div>
   <div class="ai-log" id="aiLog"></div>
@@ -690,6 +691,7 @@ python hanalife_download.py                ← 판매 + 판매중지 전체</pre
         </div>
         <p class="note">포함: serve.py · build-data.py · index.html(스크립트만) · pdf-docs.js · question.js · analysis.js · compare.js · catalog.js · product-db.js · chat.js
           — 앱 폴더에서 <code>python export-logic.py</code>를 실행하면 최신 코드로 다시 만들어집니다.</p>
+        <p class="note">AI 질문 실습: “적용이율을 보험기간별로 별도 적용하는 상품 알려줘” → 같은 이율 항목의 기간 구간과 서로 다른 이율을 원문으로 확인합니다. “최저보증이율이 10년 이내와 이후에 다른 상품”은 별도 조건입니다. 웹 데모는 가상 PDF만 검색하며, 실제 상품은 PC에서 기초서류 폴더를 연결해 확인하세요.</p>
         <p class="note demo-only" hidden>웹 데모에서 내려받기가 막히면 아래 주소를 복사해 새 탭에서 여세요(깃허브 화면 오른쪽 위 내려받기 버튼).<br><code class="url">https://github.com/lwhdngus-design/insurance-product-tools/blob/main/product-search/main-logic.txt</code></p>
       </div>
     </li>

@@ -74,10 +74,54 @@ const AI_CONCEPTS = {
     desc: "사망보험금 지급금액이 경과기간(○년 이내·이후 등)에 따라 달라짐" },
   "보험금 기간별 차등": { anchor: /보험금|지급금액|급부/g, words: ["보험금", "년"],
     desc: "보험금 지급금액이 경과기간에 따라 달라짐(체증·체감·감액 포함)" },
+  "적용이율 기간별 차등": { rate: "applied", words: ["율", "금리"],
+    desc: "적용이율·예정이율이 보험기간 또는 경과기간 구간별로 다름(최저보증·지연이자는 제외)" },
+  "최저보증이율 기간별 차등": { rate: "guaranteed", words: ["율", "금리"],
+    desc: "최저보증이율이 경과기간 구간별로 다름(적용이율과 별도로 확인)" },
 };
+
+// 이율은 첫 숫자 하나가 아니라 같은 이율 항목 안의 '기간 구간 + 서로 다른 %'를 확인한다.
+// PDF 표가 줄·열 순서로 풀린 경우도 읽되, 다음 이율 항목/조항으로 넘어가 값을 섞지 않는다.
+const RATE_LABEL_RE = /최저보증이율|최저보증금리|평균공시이율|보험계약대출이율|계약대출이율|연체이율|적립이율|예정이율|적용(?:되는|하는|한)?이율|공시이율|확정이율|확정금리|지연이자|지급지연|지연이율/g;
+const RATE_BAND_RE = /\d+(?:년|개월)?[~∼～\-]\d+(?:년|개월)(?:이내|이하|미만|까지)?|(?:계약일(?:부터|로부터)?[~∼～\-]?)?(?:최초)?\d+(?:년|개월)(?:(?:이상|초과|부터|경과후|경과|후)?(?:[~∼～\-]|부터)?\d+(?:년|개월))?(?:이내|이하|미만|이전|이후|초과|이상|까지|부터|간|경과후|경과시점|경과|후|전|만기)|제[12](?:보험기간|기간)|(?:보험료)?납입기간(?:중|이내|이후|후)|납입(?:완료|종료)(?:이전|이후|전|후)/g;
+const RATE_PERCENT_RE = /(?<![\d.])\d+(?:\.\d+)?[%％]/g;
+
+function rateScheduleHit(text, kind) {
+  const map = [];
+  let comp = "";
+  for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) { comp += text[i]; map.push(i); }
+  const labels = [...comp.matchAll(RATE_LABEL_RE)];
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i], guaranteed = /최저보증/.test(label[0]);
+    if (kind === "guaranteed" ? !guaranteed : !/^(적용(?:되는|하는|한)?이율|예정이율|확정이율|확정금리|적립이율)$/.test(label[0])) continue;
+    // 적립이율은 보험금 지급지연이자 표에도 쓰이므로 주변의 지급지연 문맥을 제외한다.
+    const before = comp.slice(Math.max(0, label.index - 90), label.index);
+    if (/지급기일|청구일|지급지연|지연이자|지연이율/.test(before)) continue;
+    let end = Math.min(comp.length, label.index + 900, labels[i + 1]?.index ?? comp.length);
+    const rest = comp.slice(label.index + label[0].length, end);
+    const boundary = rest.search(CLAUSE_RE);
+    if (boundary !== -1) end = label.index + label[0].length + boundary;
+    const window = comp.slice(label.index, end);
+    if (/지급기일|청구일|지급지연|지연이자|정당한사유없이|지급하지못/.test(window)) continue;
+    const bandMatches = [...window.matchAll(RATE_BAND_RE)], percentages = [...window.matchAll(RATE_PERCENT_RE)];
+    const bands = [...new Set(bandMatches.map(m => m[0]))];
+    if (bands.length < 2 || percentages.length < bandMatches.length) continue;
+    // 행 형태: '10년 이내 2%, 10년 초과 3%' / 열 형태: '10년 이내 | 10년 초과 / 2% | 3%'.
+    // 각 구간에 대응하는 첫 이율만 사용해 뒤쪽 보너스·할인 %를 두 번째 이율로 오인하지 않는다.
+    const column = bandMatches.at(-1).index < percentages[0].index;
+    const paired = column ? percentages.slice(0, bandMatches.length) : bandMatches.map((band, bi) =>
+      percentages.find(p => p.index > band.index && p.index < (bandMatches[bi + 1]?.index ?? window.length))).filter(Boolean);
+    const rates = [...new Set(paired.map(m => +m[0].replace(/[%％]/, "")))];
+    if (paired.length < bandMatches.length || rates.length < 2) continue;
+    const start = map[label.index], finish = map[end - 1] + 1;
+    return { text: text.slice(start, finish).replace(/\s+/g, " ").trim(), matched: [label[0], ...bands, ...rates.map(n => n + "%")], rateType: label[0], offset: start };
+  }
+  return null;
+}
 
 // 한 페이지에서 개념에 맞는 첫 구간 (원문 그대로, 기간·금액 표현 표시용 목록과 함께)
 function conceptHit(text, concept) {
+  if (AI_CONCEPTS[concept].rate) return rateScheduleHit(text, AI_CONCEPTS[concept].rate);
   const map = [];
   let comp = "";
   for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) { comp += text[i]; map.push(i); }
@@ -108,7 +152,7 @@ async function conceptEvidence(products, concept) {
   const pages = new Map(); // doc → [{page, text}]
   if (SERVER_MODE) {
     const ids = docs.filter(d => d.id).map(d => d.id), byId = new Map(docs.map(d => [d.id, d]));
-    const res = ids.length ? (await api("api/pages_with", { ids, words: c.words })).pages : [];
+    const res = ids.length ? (await api("api/pages_with", { ids, words: c.words, match_any: !!c.rate, neighbors: c.rate ? 1 : 0 })).pages : [];
     res.forEach(h => { const d = byId.get(h.id); if (d) { if (!pages.has(d)) pages.set(d, []); pages.get(d).push(h); } });
   } else {
     docs.forEach(d => pages.set(d, (d.pages || []).map((text, i) => ({ page: i + 1, text }))));
@@ -117,9 +161,17 @@ async function conceptEvidence(products, concept) {
     let found = null;
     for (const v of p.versions) {
       for (const d of [...v.docs].sort(byDocPriority)) {
-        for (const pg of pages.get(d) || []) {
-          const h = conceptHit(pg.text, concept);
-          if (h) { found = { doc: d, page: pg.page, ...h, latest: v === p.versions[0] }; break; }
+        const docPages = pages.get(d) || [];
+        for (let pi = 0; pi < docPages.length; pi++) {
+          const pg = docPages[pi];
+          let h = conceptHit(pg.text, concept), startPage = pg.page, endPage = pg.page;
+          // 이율 제목과 표의 두 번째 구간이 다음 쪽으로 이어져도 같은 문서 안에서만 결합한다.
+          const next = docPages[pi + 1];
+          if (!h && c.rate && next?.page === pg.page + 1) {
+            h = conceptHit(pg.text + "\n" + next.text, concept);
+            if (h) { endPage = next.page; if (h.offset >= pg.text.length + 1) startPage = next.page; }
+          }
+          if (h) { found = { doc: d, page: startPage, endPage, ...h, latest: v === p.versions[0] }; break; }
         }
         if (found) break;
       }
@@ -483,7 +535,9 @@ const plannerPrompt = () => `너는 보험 기초서류 검색 앱의 질문 해
 예) "튼튼간편건강보험 면책 조건 알려줘" → {"action":"list","category":"","status":"","year_from":"","year_to":"","product":"튼튼간편건강","features":[],"feature_logic":"and","text":"","field":"","value":"","group_by":"","concept":"","item":"면책","item_value":"","item_has":"","also":[],"year_basis":"","revised":"","all_versions":""}
 예) "보험료 할인 있고 선납도 되는 상품" → {"action":"list","category":"","status":"","year_from":"","year_to":"","product":"","features":[],"feature_logic":"and","features_not":[],"text":"","field":"","value":"","group_by":"","concept":"","item":"보험료 할인","item_value":"","item_has":"있음","also":[{"item":"보험료 선납","item_value":"","item_has":"있음"}],"year_basis":"","revised":"","all_versions":""}
 item을 쓰면 text는 ""로 둔다.
-concept는 질문에 '기간·경과·○년에 따라 보험금이 다르다/늘어난다/체증' 같은 말이 있을 때만 쓴다.
+concept는 질문에 '기간·경과·○년에 따라 보험금 또는 이율이 다르다/별도 적용/구간별' 같은 말이 있을 때 쓴다.
+"적용이율을 보험기간별로 별도 적용하는 상품, 예를 들어 10년 이내 2%, 10년 이후 3%"는 concept="적용이율 기간별 차등", field/value/text/item=""다. 예시의 숫자를 단일 예정이율 조건으로 넣지 않는다.
+"최저보증이율이 10년 이내와 이후에 다른 상품"은 concept="최저보증이율 기간별 차등"이다. 최저보증이율만 다른 상품을 적용이율 차등으로 답하지 않는다.
 이전 질문의 조건이 주어지면, "그 중", "그럼" 같은 이어지는 질문은 이전 조건을 이어받아 바뀐 부분만 고친다.`;
 
 // AI 응답을 검사해 허용된 값만 남김
@@ -525,6 +579,20 @@ function cleanPlan(p) {
 
 // 기간에 따라 급부(보험금)가 달라지는지 묻는 질문인지 (구조 판정이 필요한 질문)
 const conceptAsked = raw => /(기간|년|경과|시점|이내|이후).*(다르|다른|달라|달리|차등|차이|증가|감소|늘어|줄어|변하|바뀌)|체증|체감|계단식/.test(raw) && /사망|보험금|급부|지급/.test(raw);
+function rateConceptAsked(raw) {
+  if (!/이율|금리/.test(raw) || !/기간|경과|년|개월|납입/.test(raw)) return "";
+  const divided = /별도|차등|다르|다른|달라|달리|차이|구분|구간|나눠|나뉘|단계|체증|체감|바뀌|변경|기간별|경과별/.test(raw);
+  const examples = (raw.match(RATE_BAND_RE) || []).length >= 2 && (raw.match(RATE_PERCENT_RE) || []).length >= 2;
+  if (!divided && !examples) return "";
+  // 연체·대출·지급지연은 적립/예정이율 검색으로 바꾸지 않는다.
+  if (/연체|대출|지연|평균공시/.test(raw)) return "";
+  return /최저보증/.test(raw) ? "최저보증이율 기간별 차등" : "적용이율 기간별 차등";
+}
+
+function withRateConcept(plan, concept) {
+  return cleanPlan({ ...plan, concept, action: plan.action === "count" ? "count" : "find",
+    field: "", value: "", text: "", item: "", item_value: "", item_has: "", also: [], change: "" });
+}
 // 이전 질문을 이어받는 질문인지 ("그 중", "그럼", "거기서" …)
 const FOLLOW_UP_RE = /^\s*(그\s*중|그중|그럼|그러면|그리고|거기서|여기서|이\s*중|그\s*상품|그것|그거|위\s*상품|방금|앞의|그\s*결과)|그\s*중에|이\s*중에|위에서|방금\s*(찾은|나온)/;
 
@@ -645,6 +713,8 @@ function rulePlan(q) {
   if (dec) { p.year_from = dec[1] + "0"; p.year_to = dec[1] + "9"; }
   const prod = productInQuestion(raw, q);
   if (prod) p.product = prod;
+  const rateConcept = rateConceptAsked(raw);
+  if (rateConcept) return withRateConcept(p, rateConcept);
   // "예정이율이 뭐야?"처럼 용어 뜻을 묻는 질문
   if (p.field && !prod && p.action === "list" && /뭐야|뭔가요|무엇인가|무엇이야|이란|란뭐|뜻|의미|설명해/.test(raw)) p.action = "explain";
   if (/의무납입/.test(raw) && p.field === "납입기간" && !p.value) { p.field = ""; p.text = "의무납입기간"; p.action = p.action === "list" ? "find" : p.action; } // 의무납입기간(변액)은 문장에서
@@ -941,7 +1011,7 @@ async function executePlan(plan, progress, question = "") {
   let products = CATALOG_FOR_AI();
   const notes = [];
   // 상품 하나를 지정한 내용 질문
-  if (question && plan.product && (["list", "find"].includes(plan.action) || (plan.action === "count" && /몇\s*(종|회|개월|세|년|일|번)/.test(question))) && !plan.group_by) {
+  if (question && plan.product && !AI_CONCEPTS[plan.concept]?.rate && (["list", "find"].includes(plan.action) || (plan.action === "count" && /몇\s*(종|회|개월|세|년|일|번)/.test(question))) && !plan.group_by) {
     const named = products.filter(p => norm(p.name).includes(norm(plan.product).replace(/^\(무\)/, "")));
     const d = named.length === 1 ? await productDetail(plan, named[0], question) : null;
     if (d) {
@@ -975,7 +1045,7 @@ async function executePlan(plan, progress, question = "") {
   if (plan.revised) { products = products.filter(p => (p.versions.length > 1) === (plan.revised === "yes")); notes.push(`개정 이력 ${plan.revised === "yes" ? "있음(판매일자 2개 이상)" : "없음"}`); }
   if (plan.product) products = products.filter(p => norm(p.name).includes(norm(plan.product).replace(/^\(무\)/, "")));
   // '체증형'은 구조 판정(계단식·매년 증가 지급기준표)과 합쳐서 찾음
-  const unionStep = plan.concept && plan.features.includes("체증형");
+  const unionStep = plan.concept && !AI_CONCEPTS[plan.concept]?.rate && plan.features.includes("체증형");
   const feats = plan.features.filter(n => !(unionStep && n === "체증형"));
   if (feats.length) {
     const fs = feats.map(n => FEATURES.find(x => x.name === n)).filter(Boolean);
@@ -1030,7 +1100,9 @@ async function executePlan(plan, progress, question = "") {
     ev.forEach((v, k) => evidence.set(k, v));
     const step = unionStep ? FEATURES.find(f => f.name === "체증형") : null;
     products = products.filter(p => ev.has(p.key) || (step && p.feat[step.id]));
-    notes.push(`구조 판정: ${AI_CONCEPTS[plan.concept].desc} — 급부 말 뒤에 서로 다른 기간 표현 2개 이상과 금액(또는 증감) 표현이 함께 있는 원문 (규칙 판정이니 원문 확인)`);
+    notes.push(AI_CONCEPTS[plan.concept].rate
+      ? `구조 판정: ${AI_CONCEPTS[plan.concept].desc} — 같은 이율 항목 안의 기간 구간2개 이상·서로 다른 이율2개 이상을 확인. 최신 판부터 이전 판까지 검색하며 이전 판은 별도 표시. 예시 숫자는 특정 이율 조건으로 제한하지 않음. PDF 표 추출 결과이므로 원문 확인`
+      : `구조 판정: ${AI_CONCEPTS[plan.concept].desc} — 급부 말 뒤에 서로 다른 기간 표현 2개 이상과 금액(또는 증감) 표현이 함께 있는 원문 (규칙 판정이니 원문 확인)`);
   }
   let itemEv = null, itemUnread = [];
   const itemConds = [...(plan.item ? [{ item: plan.item, item_value: plan.item_value, item_has: plan.item_has }] : []), ...plan.also.filter(c => c.item)];
@@ -1136,7 +1208,7 @@ function factsFor(result) {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
       return { 상품명: x.name, 분류: x.kind, 판매상태: x.status, 최신판매일자: x.latest.start,
         ...(v ? { [p.field]: f.text ? v.value : `${v.value}${f.unit}`, 근거: `${v.doc.docType} p.${v.page}` } : p.field ? { [p.field]: "문서에서 못 찾음" } : {}),
-        ...(ev ? { 근거문장: ev[0].text.slice(0, 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}` } : {}),
+        ...(ev ? { 근거문장: ev[0].text.slice(0, AI_CONCEPTS[p.concept]?.rate ? 900 : 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}${ev[0].endPage > ev[0].page ? "~" + ev[0].endPage : ""}` } : {}),
         ...(result.itemEv && result.itemEv.get(x.key) ? { [result.itemLabel || p.item]: result.itemEv.get(x.key).text.slice(0, 220) } : {}) };
     }),
   };
@@ -1216,7 +1288,7 @@ function resultHtml(result) {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
       const link = (d, page, label) => `<a href="#" data-open="${DOCS.indexOf(d)}" data-page="${page}">${esc(label)}</a>`;
       const vCell = !p.field ? "" : `<td>${v ? `<b>${esc(f.text ? v.value : v.value + f.unit)}</b><div class="path">${link(v.doc, v.page, `${v.doc.docType}(${v.start}) p.${v.page}`)}${v.latest ? "" : " · 이전 판"}</div>` : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
-      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}`)}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
+      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}`)}${ev[0].endPage > ev[0].page ? ` · ${link(ev[0].doc, ev[0].endPage, `p.${ev[0].endPage}`)}` : ""}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
       const iv = result.itemEv ? result.itemEv.get(x.key) : null;
       const iCell = !result.itemEv ? "" : `<td>${iv ? (iv.doc ? `${link(iv.doc, iv.page, `${iv.doc.docType}(${iv.doc.start || "?"}) p.${iv.page}`)}${iv.old ? " · 이전 판" : ""} ` : "") + highlight(iv.text.slice(0, 600), iv.matched || []) : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
       return `<tr${i >= SHOW ? ' class="ai-more" hidden' : ""}><td><button type="button" class="linkbtn" data-analyze="${esc(x.key)}" data-start="${esc(x.latest.start)}">${esc(x.name)}</button></td>` +
@@ -1297,7 +1369,7 @@ async function askAi(q, mode = "auto") {
         const rp = rulePlan(q), filled = [];
         // 질문에 없는 구조 판정은 뺌 (이전 질문에서 잘못 이어받는 것 방지)
         const prevConcept = followUp && last.plan.concept;
-        if (plan.concept && !conceptAsked(norm(q)) && plan.concept !== prevConcept) { plan.concept = ""; filled.push("구조 판정 제외"); if (plan.action === "find" && !plan.text) plan.action = "list"; }
+        if (plan.concept && !conceptAsked(norm(q)) && !rateConceptAsked(norm(q)) && plan.concept !== prevConcept) { plan.concept = ""; filled.push("구조 판정 제외"); if (plan.action === "find" && !plan.text) plan.action = "list"; }
         if (!plan.concept && rp.concept) {
           plan.concept = rp.concept; plan.text = ""; filled.push("구조 판정");
           if (plan.action === "list") plan.action = "find";
@@ -1324,6 +1396,9 @@ async function askAi(q, mode = "auto") {
         }
         const conds = x => ["category", "status", "year_from", "year_to", "product", "text", "field", "value", "concept", "item"].filter(k => x[k]).length + (x.features.length ? 1 : 0);
         if (!conds(plan) && conds(rp)) { plan = { ...rp, action: plan.action === "list" ? rp.action : plan.action }; filled.push("조건 전체"); }
+        // 로컬 AI가 예시의 첫 %를 단일 예정이율 조건으로 바꾸거나 보험금 조건을 덧붙여도 바로잡는다.
+        const rateConcept = rateConceptAsked(norm(q));
+        if (rateConcept) { plan = withRateConcept(plan, rateConcept); filled.push("기간별 이율"); }
         // 이어서 질문: AI가 이전 조건을 빠뜨려도 이전 조건은 유지 (규칙 해석과 같은 방식)
         if (followUp) { plan = mergePlan(last.plan, plan); by += " · 이전 질문 조건 이어받음"; }
         if (filled.length) by += ` + 규칙 보완(${[...new Set(filled)].join("·")})`;
@@ -1380,7 +1455,8 @@ $("aiForm").addEventListener("submit", e => {
 $("aiClear").addEventListener("click", () => { $("aiLog").innerHTML = ""; AI_HISTORY.length = 0; syncAiButtons(); $("aiInput").focus(); });
 
 const AI_EXAMPLES = ["종신보험 중 판매중지된 상품은 몇 개야?", "유지보너스 있는 상품 알려줘", "암 진단 시 1000만원 주는 상품은?",
-  "보험료 할인 있고 선납도 되는 상품", "보험기간 1년짜리 상품 알려줘", "90일 면책 있는 상품", "70세까지 가입되는 상품", "가장 최근에 출시된 상품"];
+  "보험료 할인 있고 선납도 되는 상품", "보험기간 1년짜리 상품 알려줘", "90일 면책 있는 상품", "70세까지 가입되는 상품", "가장 최근에 출시된 상품",
+  "적용이율을 보험기간별로 별도 적용하는 상품 알려줘", "최저보증이율이 10년 이내와 이후에 다른 상품 알려줘"];
 $("aiExamples").innerHTML = "예시: " + AI_EXAMPLES.map(x => `<button type="button" class="mini" data-ai-ex="${esc(x)}">${esc(x)}</button>`).join(" ");
 $("aiExamples").addEventListener("click", e => {
   const b = e.target.closest("button[data-ai-ex]");
