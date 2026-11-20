@@ -22,8 +22,6 @@ Never publish real company PDFs, `product-documents/`, download logs, tokens, `.
 
 Run `python3 scripts/build_site.py` and `python3 scripts/check_site.py` from this checkout. `_site/` is generated and ignored. Only edit source files. Also run browser checks appropriate to changed behavior; use a non-loopback test hostname for static-demo mode, since loopback URLs select the local Python-server mode. Do not provide localhost preview links to the user.
 
-When application files change, regenerate `downloads/insurance-product-tools-runtime.zip` with `python3 scripts/build_runtime.py` before pushing. `--check` verifies the runtime package against current source. This package excludes development tools but retains required `.py` and `.ps1` filenames and an inventory for company review; do not disguise or rename blocked code to get it through import restrictions, or claim that this package has company approval.
-
 Before pushing app-code changes, verify the affected workflow. When the question/search engine changes, use the existing 1,000-question bank and check the actual result file, because the legacy runner does not itself fail on mismatches. Do not add unrelated tests for wording-only edits.
 
 Push ordinary commits to the configured release branch without force. GitHub Actions builds the report and demo together and deploys them to `/poc/` and `/demo/`; the original root landing page and images are retained. Inspect the Actions run and check the live `publication.json` commit before claiming publication is complete. A successful push is not proof of deployment.
