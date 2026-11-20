@@ -1,5 +1,9 @@
 # 실제 회사 문서(PDF)가 실수로 커밋·푸시되지 않도록 차단 — 교육용 가상 샘플만 허용
 *.pdf
+*.doc
+*.docx
+*.hwp
+*.hwpx
 !product-search/sample-기초서류폴더/**/*.pdf
 
 # 로컬 실행기(serve.py)가 만드는 파일 — PDF에서 읽은 글자 캐시와 내 PC 폴더 경로

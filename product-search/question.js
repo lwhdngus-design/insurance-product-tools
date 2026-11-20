@@ -296,7 +296,7 @@ function renderAnswer() {
       const lines = featureEvidence(d, f).map(s => {
         if (shown.some(t => t.page === s.page && t.text.includes(s.hit))) return ""; // 앞 문맥에 이미 보임
         shown.push({ page: s.page, text: s.before + s.hit + s.after });
-        return `<p class="snip"><a href="#" class="pg" data-open="${DOCS.indexOf(d)}" data-page="${s.page}">${esc(d.docType)} p.${s.page}</a>` +
+        return `<p class="snip"><a href="#" class="pg" ${refAttrs(d, s.page, s.hit)}>${esc(d.docType)} ${docLoc(d, s.page)}</a>` +
           `${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`;
       }).join("");
       return `<div><span class="tag">${esc(f.name)}</span>${lines}</div>`;
@@ -310,7 +310,7 @@ function renderAnswer() {
       <div class="buttons">
         <button type="button" class="primary" data-analyze="${esc(p.key)}" data-start="${esc(best.start)}">상품 분석 보기</button>
         <button type="button" data-compare-add="${esc(p.key)}" data-start="${esc(best.start)}">비교 담기</button>
-        <button type="button" data-open="${DOCS.indexOf(best)}" data-page="1">${esc(best.docType)} 열기</button>
+        <button type="button" ${refAttrs(best, 1)}>${esc(best.docType)} 열기</button>
       </div>
     </div>`;
   }).join("");
@@ -383,7 +383,7 @@ async function renderSentenceAnswer(cur) {
   box.innerHTML = head + list.slice(0, SHOW).map(p => {
     const best = p.hits[0];
     const lines = p.hits.slice(0, 3).map(h =>
-      `<p class="snip"><a href="#" class="pg" data-open="${DOCS.indexOf(h.doc)}" data-page="${h.page}">${esc(h.doc.docType)}(${esc(h.doc.start || "?")}) p.${h.page}</a>` +
+      `<p class="snip"><a href="#" class="pg" ${refAttrs(h.doc, h.page, h.text)}>${esc(h.doc.docType)}(${esc(h.doc.start || "?")}) ${docLoc(h.doc, h.page)}</a>` +
       `${highlight(h.text, h.matched)} <span class="note">핵심어 ${h.hits}/${r.groups.length}</span></p>`).join("");
     const versions = [...new Set(p.hits.map(h => h.doc.start || "판매일자 미상"))].sort().reverse();
     return `<div class="pcard">
@@ -393,7 +393,7 @@ async function renderSentenceAnswer(cur) {
       <div class="buttons">
         <button type="button" class="primary" data-analyze="${esc(p.key)}" data-start="${esc(best.doc.start)}">상품 분석 보기</button>
         <button type="button" data-compare-add="${esc(p.key)}" data-start="${esc(best.doc.start)}">비교 담기</button>
-        <button type="button" data-open="${DOCS.indexOf(best.doc)}" data-page="${best.page}">${esc(best.doc.docType)} 열기</button>
+        <button type="button" ${refAttrs(best.doc, best.page, best.text || "")}>${esc(best.doc.docType)} 열기</button>
       </div>
     </div>`;
   }).join("") + (list.length > SHOW ? `<p class="note">외 ${list.length - SHOW}개 상품 — 핵심어를 더 넣거나 분류·판매상태로 좁혀 보세요.</p>` : "");

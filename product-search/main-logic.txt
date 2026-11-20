@@ -1,6 +1,6 @@
 상품 검증 기준자료 통합 검색 — 핵심 로직(Main Logic) 추출본
 현재 구현된 코드를 수정·요약 없이 그대로 옮김 (화면 디자인/스타일 코드와 기능 설명은 제외)
-포함 파일: serve.py, build-data.py, index.html, pdf-docs.js, question.js, analysis.js, compare.js, catalog.js, product-db.js, chat.js
+포함 파일: serve.py, word_docs.py, word-preview.ps1, build-data.py, index.html, pdf-docs.js, question.js, analysis.js, compare.js, catalog.js, product-db.js, chat.js
 제외: index.html의 CSS·HTML 마크업, layout.js(화면 배치), README(기능 설명), lib/(외부 라이브러리 pdf.js), data.js(가상 데이터), selfcheck.js·examples.js(검증·예시)
 인증정보: 코드에 API 키·비밀번호 등 인증정보 없음
 
@@ -35,7 +35,11 @@ import urllib.request
 import shutil
 import subprocess
 import webbrowser
+import mimetypes
+import zipfile
+from xml.etree import ElementTree as ET
 from pathlib import Path
+import word_docs
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG = APP_DIR / "docs-folder.txt"
@@ -58,7 +62,7 @@ def norm(s):
 # ---------- 폴더 설정 ----------
 def ask_folder():
     while True:
-        raw = input("기초서류 PDF 폴더 경로를 붙여넣고 Enter\n"
+        raw = input("기초서류 Word·PDF 폴더 경로를 붙여넣고 Enter\n"
                     "(탐색기에서 기초서류 폴더를 열고 주소창 경로를 복사. 예: C:\\Users\\user\\Desktop\\insurance-product-tools\\doc_sample)\n> ")
         p = Path(raw.strip().strip('"'))
         if p.is_dir():
@@ -98,6 +102,10 @@ def init_db():
           CREATE TABLE IF NOT EXISTS tags(doc_id INT, feature_id TEXT, evidence TEXT, PRIMARY KEY(doc_id, feature_id));
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
         """)
+        columns = {r[1] for r in c.execute("PRAGMA table_info(docs)")}
+        for name, default in (("text_kind", "page"), ("fingerprint", ""), ("reader_version", "")):
+            if name not in columns:
+                c.execute(f"ALTER TABLE docs ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
         # 공백을 뺀 본문을 3글자 단위로 색인 (부분 일치 검색용, 본문은 pages 테이블에만 저장)
         c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(compact, tokenize='trigram', detail='none', content='')")
 
@@ -179,25 +187,25 @@ def ensure_tags():
             print(f"특징 사전이 바뀌어 특징 태그를 다시 계산합니다 ({len(docs)}개 문서)...")
         for doc_id, path in docs:
             pages = [t for (t,) in c.execute("SELECT text FROM pages WHERE doc_id=? ORDER BY page_no", (doc_id,))]
-            write_tags(c, doc_id, doc_tags(path, pages, feats))
+            write_tags(c, doc_id, {} if word_docs.link_only(path) else doc_tags(path, pages, feats))
         c.execute("INSERT OR REPLACE INTO meta VALUES('features_hash', ?)", (h,))
 
 
 def index_doc(item):
     """브라우저가 보낸 추출 결과 저장: {path, size, mtime, pages, error}"""
     feats, _ = load_features()
-    pages = [p or "" for p in item.get("pages") or []]
+    pages = [] if word_docs.link_only(item["path"]) else [p or "" for p in item.get("pages") or []]
     with WRITE_LOCK, connect() as c:
         old = c.execute("SELECT id FROM docs WHERE path=?", (item["path"],)).fetchone()
         if old:
             delete_doc(c, old[0])
-        cur = c.execute("INSERT INTO docs(path, size, mtime, error, n_pages) VALUES(?,?,?,?,?)",
-                        (item["path"], item["size"], item["mtime"], item.get("error") or "", len(pages)))
+        cur = c.execute("INSERT INTO docs(path,size,mtime,error,n_pages,text_kind,fingerprint,reader_version) VALUES(?,?,?,?,?,?,?,?)",
+                        (item["path"], item["size"], item["mtime"], item.get("error") or "", len(pages), item.get("text_kind", "page"), item.get("fingerprint", ""), item.get("reader_version", "")))
         doc_id = cur.lastrowid
         for i, t in enumerate(pages):
             pid = c.execute("INSERT INTO pages(doc_id, page_no, text) VALUES(?,?,?)", (doc_id, i + 1, t)).lastrowid
             c.execute("INSERT INTO pages_fts(rowid, compact) VALUES(?,?)", (pid, norm(t)))
-        tags = doc_tags(item["path"], pages, feats)
+        tags = {} if word_docs.link_only(item["path"]) else doc_tags(item["path"], pages, feats)
         write_tags(c, doc_id, tags)
     return {"id": doc_id, "features": tags, "error": item.get("error") or "", "n_pages": len(pages)}
 
@@ -220,15 +228,19 @@ def import_json_cache():
 # ---------- 목록 ----------
 def list_docs(root):
     on_disk = {}
-    for dirpath, _, names in os.walk(root):
+    for dirpath, directories, names in os.walk(root):
+        directories[:] = sorted(d for d in directories if d not in {".docs-cache", ".git"})
         for n in sorted(names):
-            if n.lower().endswith(".pdf"):
+            if Path(n).suffix.lower() in word_docs.EXTENSIONS and not n.startswith("~$"):
                 full = Path(dirpath) / n
+                if root not in full.resolve().parents:
+                    continue
                 st = full.stat()
                 rel = root.name + "/" + full.relative_to(root).as_posix()  # 폴더 선택 방식과 같은 경로 형태
-                on_disk[rel] = (st.st_size, int(st.st_mtime))
+                is_pdf = full.suffix.lower() == ".pdf"
+                on_disk[rel] = (st.st_size, int(st.st_mtime) if is_pdf else st.st_mtime_ns, "" if is_pdf or word_docs.link_only(full) else word_docs.fingerprint(full))
     with connect() as c:
-        rows = {p: (i, s, m, e, n) for i, p, s, m, e, n in c.execute("SELECT id, path, size, mtime, error, n_pages FROM docs")}
+        rows = {p: (i, s, m, e, n, kind, fp, reader) for i, p, s, m, e, n, kind, fp, reader in c.execute("SELECT id,path,size,mtime,error,n_pages,text_kind,fingerprint,reader_version FROM docs")}
         tags = {}
         for doc_id, fid, ev in c.execute("SELECT doc_id, feature_id, evidence FROM tags"):
             tags.setdefault(doc_id, {})[fid] = json.loads(ev)
@@ -240,11 +252,14 @@ def list_docs(root):
             for doc_id in gone:
                 delete_doc(c, doc_id)
     files = []
-    for rel, (size, mtime) in on_disk.items():
-        item = {"path": rel, "size": size, "mtime": mtime, "indexed": False}
+    for rel, (size, mtime, fingerprint) in on_disk.items():
+        is_pdf = Path(rel).suffix.lower() == ".pdf"
+        kind = "link" if word_docs.link_only(rel) else "page" if is_pdf else "section"
+        # Nanoseconds exceed JavaScript's exact integer range; transport Word times as strings.
+        item = {"path": rel, "size": size, "mtime": mtime if is_pdf else str(mtime), "fingerprint": fingerprint, "text_kind": kind, "indexed": False}
         r = rows.get(rel)
-        if r and r[1] == size and r[2] == mtime:
-            item.update(id=r[0], indexed=True, error=r[3] or "", n_pages=r[4], features=tags.get(r[0], {}))
+        if r and r[1] == size and r[2] == mtime and r[6] == fingerprint and (is_pdf or (r[7] == word_docs.READER_VERSION and not r[3])) and (kind != "link" or r[5] == "link"):
+            item.update(id=r[0], indexed=True, error=r[3] or "", n_pages=r[4], text_kind=r[5], features=tags.get(r[0], {}))
         files.append(item)
     return {"root": root.name, "folder": str(root), "files": files}
 
@@ -494,9 +509,20 @@ def make_handler(root):
             if len(parts) != 2 or parts[0] != root.name:
                 return None
             p = (root / parts[1]).resolve()
-            return p if p.is_file() and p.suffix.lower() == ".pdf" and root in p.parents else None
+            return p if p.is_file() and p.suffix.lower() in word_docs.EXTENSIONS and root in p.parents else None
+
+        def send_document(self, path, content_type=None):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(path.stat().st_size))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with path.open("rb") as stream:
+                shutil.copyfileobj(stream, self.wfile)
 
         def do_GET(self):
+            if urllib.parse.urlsplit("http://" + self.headers.get("Host", "")).hostname not in {"127.0.0.1", "localhost", "::1"}:
+                return self.send_error(403)
             url = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(url.query)
             if url.path == "/api/docs":
@@ -510,24 +536,62 @@ def make_handler(root):
                 p = self.doc_path(urllib.parse.unquote(url.path[len("/docs/"):]))
                 if not p:
                     return self.send_error(404)
-                data = p.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/pdf")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                return
+                return self.send_document(p)
+            if url.path.startswith("/previews/"):
+                name = url.path[len("/previews/"):]
+                if not re.fullmatch(r"[0-9a-f]{64}\.pdf", name):
+                    return self.send_error(404)
+                p = CACHE_DIR / "previews" / name
+                if not p.is_file():
+                    return self.send_error(404)
+                return self.send_document(p, "application/pdf")
             if url.path.startswith("/.docs-cache") or url.path.endswith("docs-folder.txt"):
                 return self.send_error(404)
             return super().do_GET()
 
         def do_POST(self):
+            nonlocal root
+            if urllib.parse.urlsplit("http://" + self.headers.get("Host", "")).hostname not in {"127.0.0.1", "localhost", "::1"}:
+                return self.send_error(403)
             path = urllib.parse.urlparse(self.path).path
             try:
+                origin = self.headers.get("Origin")
+                if origin and origin != "http://" + self.headers.get("Host", ""):
+                    return self.send_json({"error": "이 앱에서 직접 요청해 주세요."}, 403)
                 body = self.read_json()
+                if path == "/api/set_folder":
+                    value = str(body.get("folder", "")).strip().strip('"')
+                    if not value:
+                        raise ValueError("연결할 폴더 경로를 입력해 주세요.")
+                    selected = Path(value).expanduser().resolve(strict=True)
+                    if not selected.is_dir():
+                        raise ValueError("폴더 경로를 입력해 주세요.")
+                    CONFIG.write_text(str(selected), encoding="utf-8")
+                    root = selected
+                    return self.send_json({"folder": str(root)})
+                if path in {"/api/read_document", "/api/preview", "/api/open_original"}:
+                    p = self.doc_path(body["path"])
+                    if not p:
+                        return self.send_json({"error": "연결 폴더 안의 문서만 열 수 있습니다."}, 400)
+                    if path == "/api/open_original":
+                        if os.name == "nt":
+                            os.startfile(str(p))
+                            return self.send_json({"opened": True})
+                        return self.send_json({"opened": False})
+                    if word_docs.link_only(p):
+                        return self.send_json({"error": "이 문서는 원본 링크 전용입니다."}, 400)
+                    if path == "/api/read_document":
+                        if p.suffix.lower() not in word_docs.NATIVE_EXTENSIONS:
+                            return self.send_json({"error": "이 형식은 미리보기 변환이 필요합니다."}, 400)
+                        return self.send_json(word_docs.read_native(p))
+                    rendered = word_docs.preview(p, CACHE_DIR / "previews")
+                    return self.send_json({"url": "previews/" + rendered["path"].name, "renderer": rendered["renderer"], "fingerprint": rendered["fingerprint"]})
                 if path == "/api/index":
-                    if not self.doc_path(body["path"]):
+                    p = self.doc_path(body["path"])
+                    if not p:
                         return self.send_json({"error": "폴더 밖 경로"}, 400)
+                    if p.suffix.lower() != ".pdf" and not word_docs.link_only(p) and word_docs.fingerprint(p) != body.get("fingerprint"):
+                        return self.send_json({"error": "읽는 중 원본이 변경됐습니다. 새로고침해 주세요."}, 409)
                     return self.send_json(index_doc(body))
                 if path == "/api/search":
                     return self.send_json({"ids": search_ids(body.get("terms", []))})
@@ -542,8 +606,10 @@ def make_handler(root):
                 if path == "/api/snippets":
                     res = snippets_for([int(i) for i in body.get("ids", [])][:300], body.get("terms", []))
                     return self.send_json({"snippets": {str(k): v for k, v in res.items()}})
-            except (ValueError, KeyError, TypeError, OSError, sqlite3.Error, urllib.error.URLError) as e:
+            except (ValueError, KeyError, TypeError, OSError, sqlite3.Error, urllib.error.URLError, zipfile.BadZipFile) as e:
                 return self.send_json({"error": str(e)}, 400)
+            except (subprocess.SubprocessError, ET.ParseError):
+                return self.send_json({"error": "문서 읽기/미리보기 변환에 실패했습니다. Word/LibreOffice 설치와 파일의 보호·열기 상태를 확인해 주세요."}, 400)
             return self.send_error(404)
 
     return Handler
@@ -593,7 +659,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def main():
     ap = argparse.ArgumentParser(description="기초서류 폴더 자동 연결 실행기")
-    ap.add_argument("--folder", help="기초서류 PDF 폴더 경로 (한 번 지정하면 저장됨)")
+    ap.add_argument("--folder", help="기초서류 Word·PDF 폴더 경로 (한 번 지정하면 저장됨)")
     ap.add_argument("--sample", action="store_true",
                     help="교육용 가상 샘플 폴더(sample-기초서류폴더)로 실행 (저장된 폴더 설정은 바꾸지 않음)")
     ap.add_argument("--port", type=int, default=8765)
@@ -632,6 +698,218 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+====================================================================================================
+# FILE: word_docs.py  (Word/HWPX 직접 읽기 · 변경 확인 · 원문 미리보기 캐시)
+====================================================================================================
+"""Offline Office document text and on-demand PDF previews. Standard library only."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import threading
+import zipfile
+from xml.etree import ElementTree as ET
+
+EXTENSIONS = {".pdf", ".docx", ".doc", ".hwpx", ".hwp"}
+NATIVE_EXTENSIONS = {".docx", ".hwpx"}
+LINK_TYPES = ("산출방법서", "요율확인의뢰서")
+READER_VERSION = "office-text-1"
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+PREVIEW_LOCK = threading.Lock()
+
+
+def link_only(path):
+    return any(t in Path(path).name for t in LINK_TYPES)
+
+
+def fingerprint(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def xml_part(archive, name):
+    info = archive.getinfo(name)
+    if info.file_size > 64 * 1024 * 1024:
+        raise ValueError("문서 XML이 너무 큽니다. 문서를 나눠 저장해 주세요.")
+    return ET.fromstring(archive.read(name))
+
+
+def paragraph_text(element):
+    parts = []
+    def walk(node):
+        if node.tag in {W + "del", W + "moveFrom"}:
+            return  # Track-changes deletions are not the current document text.
+        if node.tag in {W + "t", M + "t"}:
+            parts.append(node.text or "")
+        elif node.tag == W + "tab":
+            parts.append(" ")
+        elif node.tag in {W + "br", W + "cr"}:
+            parts.append("\n")
+        else:
+            for child in node:
+                walk(child)
+    walk(element)
+    return "".join(parts).strip()
+
+
+def docx_blocks(archive):
+    root = xml_part(archive, "word/document.xml")
+    blocks = []
+    def walk(node):
+        if node.tag in {W + "del", W + "moveFrom"}:
+            return
+        if node.tag == W + "p":
+            text = paragraph_text(node)
+            if text:
+                blocks.append(text)
+        elif node.tag == W + "tbl":
+            # Keep cells in the same row together instead of mixing column values.
+            rows = []
+            for row in node.findall(W + "tr"):
+                cells = []
+                for cell in row.findall(W + "tc"):
+                    cells.append(" / ".join(filter(None, (paragraph_text(p) for p in cell.iter(W + "p")))))
+                if any(cells):
+                    rows.append(" | ".join(cells))
+            if rows:
+                blocks.append("\n".join(rows))
+        else:
+            for child in node:
+                walk(child)
+    body = root.find(W + "body")
+    if body is None:
+        raise ValueError("DOCX 문서 본문을 찾지 못했습니다.")
+    walk(body)
+    for name in ("word/footnotes.xml", "word/endnotes.xml"):
+        if name in archive.namelist():
+            for p in xml_part(archive, name).iter(W + "p"):
+                text = paragraph_text(p)
+                if text:
+                    blocks.append(text)
+    return blocks
+
+
+def read_native(path):
+    """Text units are sections, never claims about Word's physical page numbers."""
+    with zipfile.ZipFile(path) as archive:
+        if Path(path).suffix.lower() == ".docx":
+            blocks = docx_blocks(archive)
+        else:
+            blocks = []
+            names = sorted(n for n in archive.namelist() if n.startswith("Contents/section") and n.endswith(".xml"))
+            for name in names:
+                root = xml_part(archive, name)
+                for paragraph in root.iter():
+                    if paragraph.tag.rsplit("}", 1)[-1] == "p":
+                        if any(p is not paragraph and p.tag.rsplit("}", 1)[-1] == "p" for p in paragraph.iter()):
+                            continue  # Container paragraphs around tables must not repeat all cell text.
+                        text = "".join(t.text or "" for t in paragraph.iter() if t.tag.rsplit("}", 1)[-1] == "t")
+                        if text.strip():
+                            blocks.append(text.strip())
+    units, current = [], ""
+    for block in blocks:
+        if current and len(current) + len(block) > 6000:
+            units.append(current)
+            current = ""
+        current += ("\n" if current else "") + block
+    if current:
+        units.append(current)
+    if not units:
+        raise ValueError("읽을 수 있는 본문이 없습니다. 이미지/보호 문서인지 확인해 주세요.")
+    return {"pages": units, "text_kind": "section", "reader_version": READER_VERSION}
+
+
+def converter(suffix=""):
+    if os.name == "nt" and suffix not in {".hwp", ".hwpx"}:
+        import winreg
+        for flag in (winreg.KEY_READ, winreg.KEY_READ | winreg.KEY_WOW64_32KEY, winreg.KEY_READ | winreg.KEY_WOW64_64KEY):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Word.Application\CLSID", 0, flag):
+                    return "Microsoft Word", "powershell.exe"
+            except OSError:
+                pass
+    executable = shutil.which("libreoffice") or shutil.which("soffice")
+    if not executable and os.name == "nt":
+        for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")):
+            candidate = Path(base or "") / "LibreOffice/program/soffice.exe"
+            if candidate.is_file():
+                executable = str(candidate)
+                break
+    if executable:
+        return "LibreOffice", executable
+    if suffix in {".hwp", ".hwpx"}:
+        raise ValueError("한글 원문 그림 보기/HWP 읽기에는 LibreOffice 또는 PDF로 내보낸 사본이 필요합니다. HWPX 본문 검색은 직접 사용할 수 있습니다.")
+    raise ValueError("원문 그림 보기와 DOC/HWP 읽기에는 Microsoft Word(Windows) 또는 LibreOffice가 필요합니다. DOCX 본문 검색은 변환 없이 사용할 수 있습니다.")
+
+
+def preview(path, cache_dir):
+    path = Path(path).resolve(strict=True)
+    renderer, executable = converter(path.suffix.lower())
+    signature = fingerprint(path)
+    key = hashlib.sha256(("office-preview-1:" + renderer + ":" + signature + path.suffix.lower()).encode()).hexdigest()
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / (key + ".pdf")
+    with PREVIEW_LOCK:
+        if not target.is_file() or target.stat().st_size < 5:
+            with tempfile.TemporaryDirectory(prefix="render-", dir=cache_dir) as directory:
+                folder = Path(directory)
+                source = folder / ("source" + path.suffix.lower())
+                shutil.copyfile(path, source)  # Converter only sees a copy; original is never opened for editing.
+                result = folder / "source.pdf"
+                if renderer == "Microsoft Word":
+                    script = Path(__file__).with_name("word-preview.ps1")
+                    # Paths travel in environment values, never interpolated PowerShell code.
+                    env = os.environ.copy()
+                    env["INSURANCE_WORD_INPUT"] = str(source)
+                    env["INSURANCE_WORD_OUTPUT"] = str(result)
+                    command = [executable, "-NoProfile", "-NonInteractive", "-Command", script.read_text(encoding="utf-8-sig")]
+                    subprocess.run(command, env=env, check=True, capture_output=True, timeout=180)
+                else:
+                    profile = (folder / "profile").as_uri()
+                    subprocess.run([executable, "-env:UserInstallation=" + profile, "--headless", "--convert-to", "pdf:writer_pdf_Export", "--outdir", str(folder), str(source)],
+                                   check=True, capture_output=True, timeout=180)
+                if not result.is_file() or not result.read_bytes().startswith(b"%PDF-"):
+                    raise ValueError("미리보기 PDF를 만들지 못했습니다. 문서 프로그램 설치와 파일의 열기/보호 상태를 확인해 주세요.")
+                if fingerprint(path) != signature:
+                    raise ValueError("미리보기 생성 중 원본이 변경됐습니다. 새로고침한 뒤 다시 시도하세요.")
+                result.replace(target)
+    return {"key": key, "fingerprint": signature, "renderer": renderer, "path": target}
+
+====================================================================================================
+# FILE: word-preview.ps1  (Windows Microsoft Word 미리보기 PDF 생성)
+====================================================================================================
+$ErrorActionPreference = 'Stop'
+$word = $null
+$document = $null
+try {
+    $word = New-Object -ComObject Word.Application
+    $word.Visible = $false
+    $word.DisplayAlerts = 0
+    $word.AutomationSecurity = 3
+    $word.Options.UpdateLinksAtOpen = $false
+    $document = $word.Documents.Open($env:INSURANCE_WORD_INPUT, $false, $true, $false, '', '')
+    $document.ExportAsFixedFormat($env:INSURANCE_WORD_OUTPUT, 17)
+} finally {
+    if ($null -ne $document) {
+        $document.Close(0)
+        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($document)
+    }
+    if ($null -ne $word) {
+        $word.Quit(0)
+        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($word)
+    }
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+}
 
 ====================================================================================================
 # FILE: build-data.py  (가상 데이터(CSV) → data.js 변환)
@@ -817,8 +1095,13 @@ class EmbeddedCMapReaderFactory {
 const DOCS = []; // { file, path, name, docType, productName, productKey, start, end, pages: [text], error }
 
 // ---------- 경로·파일명 해석 ----------
-const DOC_TYPES = ["사업방법서", "산출방법서", "상품요약서", "약관"];
+const DOC_TYPES = ["요율확인의뢰서", "사업방법서", "산출방법서", "상품요약서", "약관"];
 const docTypeOf = name => DOC_TYPES.find(t => name.includes(t)) || "기타";
+const LINK_DOC_TYPES = ["산출방법서", "요율확인의뢰서"];
+const isLinkOnly = d => LINK_DOC_TYPES.includes(d.docType);
+const isWord = d => /\.(docx?|hwpx?)$/i.test(d.name);
+const docLoc = (d, page) => d.textKind === "section" ? `구간 ${page}` : `p.${page}`;
+const refAttrs = (d, page, anchor = "") => `data-open="${DOCS.indexOf(d)}" data-page="${page}" data-unit="${d.textKind === "section" ? "section" : "page"}"${anchor && d.textKind === "section" ? ` data-anchor="${esc(anchor.slice(0, 600))}"` : ""}`;
 
 const pad = n => String(n).padStart(2, "0");
 function validDate(y, m, d) {
@@ -831,16 +1114,16 @@ function validDate(y, m, d) {
 function findDates(str) {
   const found = [];
   const patterns = [
-    [/(?<!\d)((?:19|20)\d{2})\s*[.\-_/년]\s*(\d{1,2})\s*(?:[.\-_/월]\s*(\d{1,2})\s*일?)?(?!\d)/g, m => validDate(m[1], m[2], m[3])],
-    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate(m[1], m[2], m[3])],
-    [/(?<!\d)(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate("20" + m[1], m[2], m[3])],
-    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(?!\d)/g, m => validDate(m[1], m[2])],
+    [/(?<!\d)((?:19|20)\d{2})\s*[.\-_/년]\s*(\d{1,2})\s*(?:[.\-_/월]\s*(\d{1,2})\s*일?)?(?!\d)/g, m => validDate(m[1], m[2], m[3]), m => !!m[3]],
+    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate(m[1], m[2], m[3]), () => true],
+    [/(?<!\d)(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate("20" + m[1], m[2], m[3]), () => true],
+    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(?!\d)/g, m => validDate(m[1], m[2]), () => false],
   ];
-  for (const [re, toDate] of patterns) {
+  for (const [re, toDate, hasDay] of patterns) {
     for (const m of str.matchAll(re)) {
       const date = toDate(m);
       const s = m.index, e = m.index + m[0].length;
-      if (date && !found.some(f => s < f.e && e > f.s)) found.push({ s, e, date, text: m[0] });
+      if (date && !found.some(f => s < f.e && e > f.s)) found.push({ s, e, date, text: m[0], hasDay: hasDay(m) });
     }
   }
   return found.sort((a, b) => a.s - b.s);
@@ -867,9 +1150,13 @@ function docSaleStatus(d) {
 
 function saleDatesOf(path) {
   const parts = path.split("/");
+  const fileDates = /\.(docx?|hwpx?)$/i.test(path) ? findDates(parts[parts.length - 1]).filter(d => d.hasDay) : [];
   const candidates = [...parts.slice(0, -1).reverse(), parts[parts.length - 1]];
   for (const seg of candidates) {
     const ds = findDates(seg);
+    // Word collections often have a month or annual range outside a precise file date.
+    // Preserve the existing explicit day-folder rule while avoiding a fabricated month-first day.
+    if (ds.length && fileDates.length && (ds.length > 1 || !ds[0].hasDay)) return { start: fileDates[0].date, end: "", explicitEnd: false };
     if (ds.length) return { start: ds[0].date, end: ds.length > 1 ? ds[1].date : "", explicitEnd: ds.length > 1 };
   }
   return { start: "", end: "", explicitEnd: false };
@@ -880,9 +1167,12 @@ function saleDatesOf(path) {
 const DOC_WORDS = ["보험약관", "보통약관", "특별약관", "기본약관", "특약약관", ...DOC_TYPES];
 
 function productNameOf(fileName) {
-  let s = fileName.replace(/\.pdf$/i, "");
+  let s = fileName.replace(/\.(pdf|docx?|hwpx?)$/i, "");
   // "[보험약관] (무)…", "【사업방법서】…" 같은 대괄호 머리표 제거 (상품명의 둥근 괄호 "(무)"는 유지)
   s = s.replace(/[\[【〔［][^\]】〕］]*[\]】〕］]/g, " ");
+  // Internal Word files put revision labels after the document type. They are not product names.
+  const typeAt = DOC_WORDS.map(t => s.indexOf(t)).filter(i => i > 0).sort((a, b) => a - b)[0];
+  if (typeAt !== undefined && /[가-힣]{2}/.test(s.slice(0, typeAt))) s = s.slice(0, typeAt);
   for (const d of findDates(s).reverse()) s = s.slice(0, d.s) + " " + s.slice(d.e);
   for (const t of DOC_WORDS) s = s.split(t).join(" ");
   // "(계약자용)", "_계약자용" 등은 같은 상품으로 봄 → 상품명에서 제외
@@ -949,12 +1239,25 @@ function makeDoc(path, extra) {
   const name = path.split("/").pop();
   const productName = productNameFromPath(path);
   return { path, name, docType: docTypeOf(name), productName, productKey: productKeyFrom(productName),
-           ...saleDatesOf(path), saleFolder: saleFolderOf(path), pages: [], error: "", ...extra };
+           ...saleDatesOf(path), saleFolder: saleFolderOf(path), format: name.split(".").pop().toLowerCase(), textKind: /\.(docx|hwpx)$/i.test(name) ? "section" : "page", pages: [], error: "", ...extra };
 }
 
 async function readPages(doc, getBytes) {
   try {
-    doc.pages = await extractPages(await getBytes());
+    if (isLinkOnly(doc)) { doc.pages = []; doc.textKind = "link"; doc.error = ""; return; }
+    if (isWord(doc)) {
+      if (!SERVER_MODE) throw new Error("Word/한글 본문은 start-search.bat으로 실행한 PC 앱에서 읽습니다.");
+      if (["docx", "hwpx"].includes(doc.format)) {
+        const data = await api("api/read_document", { path: doc.path });
+        doc.pages = data.pages;
+        doc.textKind = data.text_kind;
+      } else {
+        const result = await api("api/preview", { path: doc.path });
+        doc.previewUrl = result.url; doc.renderer = result.renderer;
+        doc.pages = await extractPages(new Uint8Array(await (await fetch(result.url)).arrayBuffer()));
+        doc.textKind = "page";
+      }
+    } else doc.pages = await extractPages(await getBytes());
     if (!doc.pages.join("").trim()) doc.error = "본문 텍스트 없음 (스캔 이미지 PDF일 수 있음)";
   } catch (e) {
     doc.error = "읽기 실패: " + (e && e.message ? e.message : e);
@@ -983,13 +1286,15 @@ function finishLoading(label) {
   setTimeout(() => { $("docsProgress").hidden = true; }, 600);
   const failed = DOCS.filter(d => d.error).length, noDate = DOCS.filter(d => !d.start).length;
   $("docsDot").classList.toggle("ok", DOCS.length > 0);
-  $("docsStatus").textContent = `${label} — PDF ${DOCS.length}개` +
+  const wordCount = DOCS.filter(isWord).length;
+  $("docsStatus").textContent = `${label} — ${wordCount ? `문서 ${DOCS.length}개 (Word·한글 ${wordCount}개)` : `PDF ${DOCS.length}개`}` +
     (failed ? ` (본문 못 읽음 ${failed}개)` : "") + (noDate ? ` · 판매일자 인식 못함 ${noDate}개` : "");
   renderAll();
 }
 
 function resetDocs() {
   movedDupCount = 0;
+  if (typeof SPEC_CACHE !== "undefined") SPEC_CACHE.clear();
   DOCS.forEach(d => d.url && d.url.startsWith("blob:") && URL.revokeObjectURL(d.url));
   DOCS.length = 0;
 }
@@ -1002,10 +1307,10 @@ const progress = (i, n, path) => {
 
 // 방법 1) [폴더 선택] — 파일을 매번 다시 선택 (index.html을 더블클릭해서 연 경우)
 async function loadFolder(fileList) {
-  const files = [...fileList].filter(f => /\.pdf$/i.test(f.name));
+  const files = [...fileList].filter(f => /\.(pdf|docx?|hwpx?)$/i.test(f.name) && !f.name.startsWith("~$"));
   resetDocs();
   if (!files.length) {
-    $("docsStatus").textContent = "선택한 폴더에 PDF 파일이 없습니다.";
+    $("docsStatus").textContent = "선택한 폴더에 지원하는 기초서류가 없습니다.";
     renderAll();
     return;
   }
@@ -1055,7 +1360,7 @@ async function loadFromServer() {
   $("docsFolder").textContent = folder;
   for (const f of files) {
     const url = "docs/" + f.path.split("/").map(encodeURIComponent).join("/");
-    DOCS.push(makeDoc(f.path, { url, id: f.id, size: f.size, mtime: f.mtime, indexed: f.indexed,
+    DOCS.push(makeDoc(f.path, { url, id: f.id, size: f.size, mtime: f.mtime, fingerprint: f.fingerprint, textKind: f.text_kind, indexed: f.indexed,
                                 error: f.error || "", features: f.features || {} }));
   }
   const todo = DOCS.filter(d => !d.indexed);
@@ -1064,6 +1369,7 @@ async function loadFromServer() {
   // 새 파일·수정된 파일만 읽어서 색인 (중간에 창을 닫아도 다음에 이어서 진행)
   indexing = true;
   $("reloadDocsBtn").disabled = true;
+  $("changeDocsFolderBtn").disabled = true;
   const t0 = Date.now();
   try {
     for (let i = 0; i < todo.length; i++) {
@@ -1074,13 +1380,14 @@ async function loadFromServer() {
         $("docsStatus").textContent += ` · 남은 시간 약 ${left}분`;
       }
       await readPages(d, async () => new Uint8Array(await (await fetch(d.url)).arrayBuffer()));
-      const r = await api("api/index", { path: d.path, size: d.size, mtime: d.mtime, pages: d.pages, error: d.error });
+      const r = await saveDocIndex(d);
       Object.assign(d, { id: r.id, features: r.features, indexed: true, pages: [], pagesLoaded: false });
       if (i % 25 === 24) renderAll(); // 색인된 문서부터 바로 검색 가능
     }
   } finally {
     indexing = false;
     $("reloadDocsBtn").disabled = false;
+    $("changeDocsFolderBtn").disabled = false;
   }
   finishLoading(`자동 연결: ${root} (새로 색인 ${todo.length}개)`);
 }
@@ -1089,6 +1396,8 @@ if (SERVER_MODE) {
   $("serverMode").hidden = false;
   $("noFolder").hidden = true;
   $("reloadDocsBtn").hidden = false;
+  $("changeDocsFolderBtn").hidden = false;
+  $("folderPicker").hidden = true;
   $("docsNote").textContent = "start.bat으로 실행 중 — 지정 폴더를 자동으로 읽어 내 PC의 검색 색인(앱 폴더 .docs-cache)에 저장합니다. " +
     "다음 실행부터는 새로 추가·수정된 파일만 읽습니다. 외부로는 아무것도 전송되지 않습니다.";
   const run = () => loadFromServer().catch(err => {
@@ -1098,6 +1407,12 @@ if (SERVER_MODE) {
       : "자동 연결 실패: " + err.message;
   });
   $("reloadDocsBtn").addEventListener("click", run);
+  $("changeDocsFolderBtn").addEventListener("click", async () => {
+    const folder = window.prompt("연결할 Word·PDF 원본 폴더 경로를 입력하세요.", $("docsFolder").textContent);
+    if (!folder || !folder.trim()) return;
+    try { await api("api/set_folder", { folder }); await run(); }
+    catch (err) { $("docsStatus").textContent = "폴더 변경 실패: " + err.message; }
+  });
   run();
 }
 
@@ -1129,6 +1444,7 @@ if (DEMO_MODE) {
 // 판매기간·분류·판매상태 조건 (키워드 검색과 질문 검색이 함께 사용)
 const MAIN_DOC_TYPES = ["사업방법서", "상품요약서", "약관"];
 function docMatchesFilters(d, { from, to, category, status, docType }) {
+  if (isLinkOnly(d)) return false; // Product links only: never use these contents as search/analysis evidence.
   if (docType && (docType === "기타" ? MAIN_DOC_TYPES.includes(d.docType) : d.docType !== docType)) return false;
   // 판매기간 겹침: 판매개시일 <= To AND (종료일 빈값 OR 종료일 >= From). 판매일자를 모르면 기간 검색에서 제외
   if ((from || to) && !(d.start && (!to || d.start <= to) && (!from || !d.end || d.end >= from))) return false;
@@ -1233,11 +1549,11 @@ async function renderDocs(keepPage = false) {
     return;
   }
   $("docsResults").innerHTML = pageRows.map(({ doc: d, terms }) => {
-    let snipHtml = "", firstPage = 1;
+    let snipHtml = "", firstPage = 1, anchor = "";
     if (terms.length) {
       const list = snips.get(d) || [];
-      if (list.length) firstPage = list[0].page;
-      snipHtml = list.map(s => `<p class="snip"><span class="pg">p.${s.page}</span>${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`).join("")
+      if (list.length) { firstPage = list[0].page; anchor = list[0].before + list[0].hit + list[0].after; }
+      snipHtml = list.map(s => `<p class="snip"><span class="pg">${docLoc(d, s.page)}</span>${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`).join("")
         || `<p class="snip note">파일 경로에서 일치</p>`;
     }
     if (d.error) snipHtml += `<p class="warn">${esc(d.error)}</p>`;
@@ -1247,7 +1563,7 @@ async function renderDocs(keepPage = false) {
       <td>${esc(d.docType)}</td>
       <td>${esc(d.productName || d.name)}<div class="path">${esc(d.path)}</div></td>
       <td>${snipHtml}</td>
-      <td class="actions"><button type="button" data-open="${DOCS.indexOf(d)}" data-page="${firstPage}">열기</button>
+      <td class="actions"><button type="button" ${refAttrs(d, firstPage, anchor)}>열기</button>
         <button type="button" data-analyze="${esc(productKeyOf(d))}" data-start="${esc(d.start)}">분석</button></td>
     </tr>`;
   }).join("");
@@ -1278,10 +1594,14 @@ function docLinksHtml(docs, cls = "doclinks") {
   for (const t of MAIN_DOC_TYPES) {
     const list = docs.filter(d => d.docType === t);
     if (!list.length) { parts.push(`<span class="miss">${t} 없음</span>`); continue; }
-    parts.push(list.map((d, i) => `<a href="#" data-open="${DOCS.indexOf(d)}" data-page="1" title="${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""}</a>`).join(" "));
+    parts.push(list.map((d, i) => `<a href="#" ${refAttrs(d, 1)} title="${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""}</a>`).join(" "));
   }
-  docs.filter(d => !MAIN_DOC_TYPES.includes(d.docType))
-    .forEach(d => parts.push(`<a href="#" data-open="${DOCS.indexOf(d)}" data-page="1" title="${esc(d.path)}">${esc(d.docType === "기타" ? d.name : d.docType)}</a>`));
+  for (const t of LINK_DOC_TYPES) {
+    const list = docs.filter(d => d.docType === t);
+    parts.push(list.length ? list.map((d, i) => `<a href="#" data-original="${DOCS.indexOf(d)}" title="원본을 PC 연결 프로그램으로 열기: ${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""} ↗</a>`).join(" ") : `<span class="miss">${t} 없음</span>`);
+  }
+  docs.filter(d => !MAIN_DOC_TYPES.includes(d.docType) && !isLinkOnly(d))
+    .forEach(d => parts.push(`<a href="#" ${refAttrs(d, 1)} title="${esc(d.path)}">${esc(d.docType === "기타" ? d.name : d.docType)}</a>`));
   return `<span class="${cls}">${parts.join("")}</span>`;
 }
 
@@ -1289,18 +1609,87 @@ function docLinksHtml(docs, cls = "doclinks") {
 const productKeyOf = d => d.productKey || norm(d.name);
 
 // PDF 열기: 메모리의 파일을 새 탭으로 (일치한 페이지로 이동). 결과·답변·분석 화면 공통
-function openDoc(index, page) {
+async function openDoc(index, page, unit = "page", anchor = "") {
   const d = DOCS[index];
+  if (!d) return;
+  if (isLinkOnly(d)) return openOriginal(d);
+  if (isWord(d)) {
+    $("modalTitle").textContent = `${d.productName || d.name} · ${d.docType} 미리보기`;
+    $("modalBody").style.gridTemplateColumns = "minmax(300px, 1fr)";
+    $("modalBody").innerHTML = `<p class="note">Word 원문 미리보기를 준비하는 중입니다. 처음에는 문서 프로그램으로 변환하므로 시간이 걸릴 수 있습니다.</p>`;
+    $("imgModal").hidden = false;
+    try {
+      await ensurePages([d]);
+      const nativeText = unit === "section" ? anchor || (d.nativePages || d.pages)[(+page || 1) - 1] || "" : "";
+      await ensureWordPreview(d);
+      if (nativeText) {
+        const candidates = nativeText.split("\n").map(t => norm(t).replace(/\|/g, "")).filter(s => s.length >= 15).slice(0, 30);
+        let found = -1, multiple = false;
+        for (const candidate of candidates) {
+          for (const length of [80, 40, 24]) {
+            const key = candidate.slice(0, length), hits = d.pages.map((p, i) => norm(p).includes(key) ? i : -1).filter(i => i >= 0);
+            if (hits.length) { found = hits[0]; multiple = hits.length > 1; break; }
+          }
+          if (found >= 0) break;
+        }
+        page = found >= 0 ? found + 1 : 1;
+        d.locationNotice = found >= 0 ? multiple ? "같은 근거 문구가 여러 쪽에 있어 첫 일치 쪽을 엽니다." : "근거 문구를 변환된 PDF 쪽으로 연결했습니다." : "해당 구간의 실제 쪽을 확정하지 못해 첫 쪽을 엽니다. 원문에서 확인해 주세요.";
+      }
+      return showDocPage(d, +page || 1);
+    } catch (err) {
+      $("modalBody").innerHTML = `<div><p class="warn">미리보기를 만들지 못했습니다: ${esc(err.message)}</p><button type="button" data-original="${DOCS.indexOf(d)}">원본 ${d.format.toUpperCase()} 열기</button><p class="note">DOCX 본문 검색은 문서 변환 없이 사용할 수 있습니다.</p></div>`;
+      return;
+    }
+  }
   if (DEMO_MODE) { showDocPage(d, +page || 1); return; } // 웹 데모는 새 창을 못 열어 화면 안에 그 쪽을 그림으로 보여 줌
   d.url ||= URL.createObjectURL(d.file); // 서버 모드는 처음부터 docs/... 주소가 있음
   window.open(`${d.url}#page=${page || 1}`, "_blank");
 }
 document.addEventListener("click", e => {
+  const original = e.target.closest("[data-original]");
+  if (original) { e.preventDefault(); openOriginal(DOCS[+original.dataset.original]).catch(err => demoNotice(err.message)); return; }
   const btn = e.target.closest("button[data-open], a[data-open]");
   if (!btn) return;
   e.preventDefault();
-  openDoc(+btn.dataset.open, btn.dataset.page);
+  openDoc(+btn.dataset.open, btn.dataset.page, btn.dataset.unit, btn.dataset.anchor || "");
 });
+
+async function openOriginal(d) {
+  if (SERVER_MODE) {
+    const result = await api("api/open_original", { path: d.path });
+    if (result.opened) return;
+  }
+  d.url ||= URL.createObjectURL(d.file);
+  const a = document.createElement("a"); a.href = d.url; a.download = d.name; a.click();
+}
+
+const saveDocIndex = d => api("api/index", { path: d.path, size: d.size, mtime: d.mtime, fingerprint: d.fingerprint || "", reader_version: isWord(d) ? "office-text-1" : "", text_kind: d.textKind, pages: d.pages, error: d.error });
+
+async function ensureWordPreview(d) {
+  if (!isWord(d) || isLinkOnly(d)) return;
+  if (d.previewUrl && d.textKind === "page") return;
+  if (d.previewTask) return d.previewTask;
+  d.previewTask = (async () => {
+    await ensurePages([d]);
+    const result = await api("api/preview", { path: d.path });
+    if (result.fingerprint !== d.fingerprint) throw new Error("원본이 변경됐습니다. 기초서류 새로고침 후 다시 열어 주세요.");
+    const pages = await extractPages(new Uint8Array(await (await fetch(result.url)).arrayBuffer()));
+    const saved = await saveDocIndex({ ...d, pages, textKind: "page", error: "" });
+    d.nativePages ||= d.textKind === "section" ? d.pages : [];
+    Object.assign(d, { pages, pagesLoaded: true, textKind: "page", previewUrl: result.url, renderer: result.renderer, error: "", id: saved.id, features: saved.features });
+    for (const key of ["_lines", "_sections", "_tableSegs", "_sectionImgs"]) delete d[key];
+    if (typeof SPEC_CACHE !== "undefined") SPEC_CACHE.clear();
+    if (typeof CATALOG !== "undefined") CATALOG = buildCatalog();
+  })();
+  try { await d.previewTask; } finally { d.previewTask = null; }
+}
+
+async function prepareWordPreviews(docs) {
+  for (const d of docs.filter(x => isWord(x) && !isLinkOnly(x) && !x.error)) {
+    try { await ensureWordPreview(d); d.previewError = ""; }
+    catch (err) { d.previewError = err.message; }
+  }
+}
 
 $("folderInput").addEventListener("change", e => {
   loadFolder(e.target.files).catch(err => { $("docsStatus").textContent = "폴더 읽기 실패: " + err.message; });
@@ -1608,7 +1997,7 @@ function renderAnswer() {
       const lines = featureEvidence(d, f).map(s => {
         if (shown.some(t => t.page === s.page && t.text.includes(s.hit))) return ""; // 앞 문맥에 이미 보임
         shown.push({ page: s.page, text: s.before + s.hit + s.after });
-        return `<p class="snip"><a href="#" class="pg" data-open="${DOCS.indexOf(d)}" data-page="${s.page}">${esc(d.docType)} p.${s.page}</a>` +
+        return `<p class="snip"><a href="#" class="pg" ${refAttrs(d, s.page, s.hit)}>${esc(d.docType)} ${docLoc(d, s.page)}</a>` +
           `${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`;
       }).join("");
       return `<div><span class="tag">${esc(f.name)}</span>${lines}</div>`;
@@ -1622,7 +2011,7 @@ function renderAnswer() {
       <div class="buttons">
         <button type="button" class="primary" data-analyze="${esc(p.key)}" data-start="${esc(best.start)}">상품 분석 보기</button>
         <button type="button" data-compare-add="${esc(p.key)}" data-start="${esc(best.start)}">비교 담기</button>
-        <button type="button" data-open="${DOCS.indexOf(best)}" data-page="1">${esc(best.docType)} 열기</button>
+        <button type="button" ${refAttrs(best, 1)}>${esc(best.docType)} 열기</button>
       </div>
     </div>`;
   }).join("");
@@ -1695,7 +2084,7 @@ async function renderSentenceAnswer(cur) {
   box.innerHTML = head + list.slice(0, SHOW).map(p => {
     const best = p.hits[0];
     const lines = p.hits.slice(0, 3).map(h =>
-      `<p class="snip"><a href="#" class="pg" data-open="${DOCS.indexOf(h.doc)}" data-page="${h.page}">${esc(h.doc.docType)}(${esc(h.doc.start || "?")}) p.${h.page}</a>` +
+      `<p class="snip"><a href="#" class="pg" ${refAttrs(h.doc, h.page, h.text)}>${esc(h.doc.docType)}(${esc(h.doc.start || "?")}) ${docLoc(h.doc, h.page)}</a>` +
       `${highlight(h.text, h.matched)} <span class="note">핵심어 ${h.hits}/${r.groups.length}</span></p>`).join("");
     const versions = [...new Set(p.hits.map(h => h.doc.start || "판매일자 미상"))].sort().reverse();
     return `<div class="pcard">
@@ -1705,7 +2094,7 @@ async function renderSentenceAnswer(cur) {
       <div class="buttons">
         <button type="button" class="primary" data-analyze="${esc(p.key)}" data-start="${esc(best.doc.start)}">상품 분석 보기</button>
         <button type="button" data-compare-add="${esc(p.key)}" data-start="${esc(best.doc.start)}">비교 담기</button>
-        <button type="button" data-open="${DOCS.indexOf(best.doc)}" data-page="${best.page}">${esc(best.doc.docType)} 열기</button>
+        <button type="button" ${refAttrs(best.doc, best.page, best.text || "")}>${esc(best.doc.docType)} 열기</button>
       </div>
     </div>`;
   }).join("") + (list.length > SHOW ? `<p class="note">외 ${list.length - SHOW}개 상품 — 핵심어를 더 넣거나 분류·판매상태로 좁혀 보세요.</p>` : "");
@@ -1977,7 +2366,8 @@ async function renderRegions(pdf, regions) {
 }
 
 const openPdf = async d => {
-  const data = d.file ? new Uint8Array(await d.file.arrayBuffer()) : new Uint8Array(await (await fetch(d.url)).arrayBuffer());
+  if (isWord(d)) await ensureWordPreview(d);
+  const data = d.file && !isWord(d) ? new Uint8Array(await d.file.arrayBuffer()) : new Uint8Array(await (await fetch(d.previewUrl || d.url)).arrayBuffer());
   return pdfjsLib.getDocument({ data, CMapReaderFactory: EmbeddedCMapReaderFactory, cMapPacked: true }).promise;
 };
 
@@ -2015,7 +2405,7 @@ const isTableLike = sec => sec.lines.length >= 6 && sec.lines.filter(l => l.text
 
 async function prepareSections(docs) {
   for (const d of docs) {
-    if (d.docType !== "사업방법서" || d._sectionImgs !== undefined) continue;
+    if (d.docType !== "사업방법서" || d._sectionImgs !== undefined || d.previewError) continue;
     d._sectionImgs = {};
     const secs = sectionsOf(d).filter(isTableLike);
     if (!secs.length) continue;
@@ -2049,7 +2439,7 @@ async function prepareSections(docs) {
 
 async function prepareTables(docs) {
   for (const d of docs) {
-    if (d.docType !== "약관" || d._tableSegs !== undefined) continue;
+    if (d.docType !== "약관" || d._tableSegs !== undefined || d.previewError) continue;
     const tables = payTablesOf([d]);
     d._tableSegs = null;
     if (!tables.length) continue;
@@ -2090,7 +2480,7 @@ function attachStructured(tables) {
   return tables;
 }
 
-const refOf = h => `${h.doc.docType} p.${h.page}`;
+const refOf = h => `${h.doc.docType} ${docLoc(h.doc, h.page)}`;
 // 비교용 숫자 (줄 앞 번호 "4.", "1)", "(2)" 는 제외)
 const stripEnum = t => t.replace(/^\s*(\d+[.)]|\(\d+\)|[①-⑳])\s*/, "");
 // "보험기간: 종신 / 납입기간: 10년납"처럼 한 줄에 여러 항목이 있으면 해당 항목 값만 잘라 비교
@@ -2109,7 +2499,7 @@ function productVersions(key) {
 function analyzeProduct(key, start) {
   const all = DOCS.filter(d => productKeyOf(d) === key && d.start === start && !d.error);
   const sources = all.filter(d => SOURCE_TYPES.includes(d.docType)).sort(byDocPriority);
-  const others = all.filter(d => !SOURCE_TYPES.includes(d.docType) && d.docType !== "산출방법서").sort(byDocPriority);
+  const others = all.filter(d => !SOURCE_TYPES.includes(d.docType) && !isLinkOnly(d)).sort(byDocPriority);
   const name = (all[0] || DOCS.find(d => productKeyOf(d) === key) || {}).productName || key;
   const base = sources.length ? sources : others;
   const R = { key, start, name, base, rows: [], checks: [], cautions: [] };
@@ -2118,6 +2508,7 @@ function analyzeProduct(key, start) {
   if (!sources.length && others.length) R.checks.push(`사업방법서·상품요약서·약관을 찾지 못해 ${others.map(d => d.name).join(", ")} 기준으로 추출했습니다.`);
   const failed = DOCS.filter(d => productKeyOf(d) === key && d.start === start && d.error);
   failed.forEach(d => R.checks.push(`${d.name}: ${d.error}`));
+  base.filter(d => d.previewError).forEach(d => R.checks.push(`${d.docType}: 원문 그림 미리보기 ${d.previewError} (본문 분석은 구간 근거로 제공)`));
 
   // 규칙 기반 판정 중 확신이 낮은 항목 → 표의 항목명 옆 표시 + 확인 필요 목록
   const lowConf = (label, reason, line) => {
@@ -2164,7 +2555,7 @@ function analyzeProduct(key, start) {
   const tables = attachStructured(payTablesOf(base.filter(d => d.docType === "약관")));
   R.payTables = tables;
   // 근거 표시: 어느 표에서 나왔는지 (예: "약관 p.4 별표2 암진단특약 보험금 지급기준표 주석")
-  const tRef = x => `약관 p.${x.page} ${(x.table || "지급기준표").replace(/\s+/g, " ").slice(0, 30)}${x.note ? " 주석" : ""}`;
+  const tRef = x => `약관 ${docLoc(x.doc, x.page)} ${(x.table || "지급기준표").replace(/\s+/g, " ").slice(0, 30)}${x.note ? " 주석" : ""}`;
   if (!tables.length && base.some(d => d.docType === "약관"))
     R.checks.push("약관에서 '보험금 지급기준표'를 찾지 못해 지급사유·감액·면책은 본문 문장에서 찾았습니다 (정확도 낮음).");
   const tLine = x => ({ text: x.text.slice(0, 400), ref: tRef(x), hit: { doc: x.doc, page: x.page } });
@@ -2187,13 +2578,13 @@ function analyzeProduct(key, start) {
       }
       // 지급사유는 첫 번째(주계약) 표만 보여주고 나머지 표 제목을 안내. 감액·면책은 모든 표의 주석에서 찾음
       const extra = def.id === "benefit" && tables.length > 1
-        ? "그 밖의 지급기준표: " + tables.slice(1).map(t => `${t.title} (p.${t.page})`).join(", ") : "";
+        ? "그 밖의 지급기준표: " + tables.slice(1).map(t => `${t.title} (${docLoc(t.doc, t.page)})`).join(", ") : "";
       if (none) lowConf(def.label, def.id === "reduce"
         ? "지급기준표 주석에서 '기간 + 감액 비율' 문장을 찾지 못해 '없음'으로 판정 — 표 그림과 주석 확인"
         : "지급기준표 주석에서 '기간 + 지급하지 않음' 문장을 찾지 못해 '없음'으로 판정 — 표 그림과 주석 확인");
       R.rows.push({ id: def.id, label: def.label, lines, more, none, fromTable: true, extra,
                     images: def.id === "benefit" ? main.images || [] : [] });
-      if (!lines.length && !none) R.checks.push(`${def.label}: 지급기준표에서 표 내용을 읽지 못함 (약관 p.${main.page} 원문 확인)`);
+      if (!lines.length && !none) R.checks.push(`${def.label}: 지급기준표에서 표 내용을 읽지 못함 (약관 ${docLoc(main.doc, main.page)} 원문 확인)`);
       continue;
     }
     let { hits, more } = def.labelRe ? findLines(base, def.labelRe) : { hits: [] };
@@ -2280,7 +2671,7 @@ function openImgModal(title, sets) {
   $("modalBody").style.gridTemplateColumns = `repeat(${sets.length}, minmax(${sets.length > 1 ? 420 : 300}px, 1fr))`;
   $("modalBody").innerHTML = sets.map(s => `<div class="modal-col">${sets.length > 1 ? `<h4>${esc(s.title)}</h4>` : ""}` +
     (s.images.length ? s.images.map(im => `<img src="${im.src}" alt="${esc(im.doc.docType)} p.${im.page}">` +
-      `<p class="note">${esc(im.doc.docType)} p.${im.page} <a href="#" data-open="${DOCS.indexOf(im.doc)}" data-page="${im.page}">원문 열기</a></p>`).join("")
+      `<p class="note">${esc(im.doc.docType)} p.${im.page} <a href="#" ${refAttrs(im.doc, im.page)}>원문 열기</a></p>`).join("")
       : `<p class="na">지급기준표 그림 없음</p>`) + `</div>`).join("");
   $("imgModal").hidden = false;
   $("modalClose").focus();
@@ -2296,7 +2687,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") $("imgModal"
 let CURRENT = null;
 
 const lineHtml = l => `<p class="line">${esc(l.text)} ` +
-  (l.hit ? `<a href="#" class="ref" data-open="${DOCS.indexOf(l.hit.doc)}" data-page="${l.hit.page}">(${esc(l.ref)})</a>` : `<span class="ref">(${esc(l.ref)})</span>`) + `</p>`;
+  (l.hit ? `<a href="#" class="ref" ${refAttrs(l.hit.doc, l.hit.page, l.text)}>(${esc(l.ref)})</a>` : `<span class="ref">(${esc(l.ref)})</span>`) + `</p>`;
 
 async function showAnalysis(key, start) {
   const versions = productVersions(key);
@@ -2307,6 +2698,7 @@ async function showAnalysis(key, start) {
   try {
     const vdocs = DOCS.filter(d => productKeyOf(d) === key && d.start === start);
     await ensurePages(vdocs);
+    await prepareWordPreviews(vdocs.filter(d => SOURCE_TYPES.includes(d.docType)));
     await prepareTables(vdocs);
     await prepareSections(vdocs);
   } catch (e) {
@@ -2327,7 +2719,7 @@ async function showAnalysis(key, start) {
     </tr>`).join("");
   const vdocs = DOCS.filter(d => productKeyOf(d) === key && d.start === start);
   $("analysisBody").innerHTML = `
-    <div class="doclinks-box"><b>기초서류 원문</b> <span class="note">(판매개시일 ${esc(start || "미상")} · 누르면 PDF가 열림)</span>${docLinksHtml(vdocs, "doclinks-row")}</div>
+    <div class="doclinks-box"><b>기초서류 원문</b> <span class="note">(판매개시일 ${esc(start || "미상")} · Word는 미리보기, ↗는 원본 프로그램 열기)</span>${docLinksHtml(vdocs, "doclinks-row")}</div>
     <h3>한눈에 보기</h3>
     ${R.overview.map(t => `<p class="line">${esc(t)}</p>`).join("")}
     <h3>핵심 특징 표</h3>
@@ -2436,7 +2828,7 @@ const ANALYSIS_PROMPT = `당신은 보험상품 문서를 분석하는 보험 �
 function promptWithDocs(R) {
   const docs = R.base;
   return ANALYSIS_PROMPT + docs.map(d =>
-    `--- ${d.docType}: ${d.path} ---\n` + d.pages.map((t, i) => `[p.${i + 1}]\n${t.trim()}`).join("\n\n")).join("\n\n");
+    `--- ${d.docType}: ${d.path} ---\n` + d.pages.map((t, i) => `[${docLoc(d, i + 1)}]\n${t.trim()}`).join("\n\n")).join("\n\n");
 }
 
 async function copyText(text, btn) {
@@ -2549,7 +2941,7 @@ function revisionDiff(key, oldStart, newStart) {
 
 // ---------- 화면 ----------
 const MAX_DIFF_LINES = 60;
-const refLink = l => `<a href="#" class="ref" data-open="${DOCS.indexOf(l.doc)}" data-page="${l.page}">(${esc(l.doc.docType)} p.${l.page})</a>`;
+const refLink = l => `<a href="#" class="ref" ${refAttrs(l.doc, l.page, l.text)}>(${esc(l.doc.docType)} ${docLoc(l.doc, l.page)})</a>`;
 
 async function showCompare() {
   if (TRAY.length < 2) return;
@@ -2561,6 +2953,7 @@ async function showCompare() {
   try {
     const cdocs = DOCS.filter(d => items.some(t => productKeyOf(d) === t.key && d.start === t.start));
     await ensurePages(cdocs);
+    await prepareWordPreviews(cdocs.filter(d => SOURCE_TYPES.includes(d.docType)));
     await prepareTables(cdocs);
     await prepareSections(cdocs);
   } catch (e) {
@@ -2638,9 +3031,9 @@ function compareMarkdown() {
     diff.forEach(x => {
       out.push("", `### ${x.type}`);
       if (x.missing) return out.push(`- 비교 불가: ${x.missing}`);
-      x.changed.forEach(c => out.push(`- 변경: ${c.from.text} → ${c.to.text} (${c.to.doc.docType} p.${c.to.page})`));
-      x.removed.forEach(l => out.push(`- 삭제: ${l.text} (${l.doc.docType} p.${l.page})`));
-      x.added.forEach(l => out.push(`- 추가: ${l.text} (${l.doc.docType} p.${l.page})`));
+      x.changed.forEach(c => out.push(`- 변경: ${c.from.text} → ${c.to.text} (${c.to.doc.docType} ${docLoc(c.to.doc, c.to.page)})`));
+      x.removed.forEach(l => out.push(`- 삭제: ${l.text} (${l.doc.docType} ${docLoc(l.doc, l.page)})`));
+      x.added.forEach(l => out.push(`- 추가: ${l.text} (${l.doc.docType} ${docLoc(l.doc, l.page)})`));
       if (!x.changed.length && !x.removed.length && !x.added.length) out.push("- 바뀐 줄 없음");
     });
   }
@@ -2657,9 +3050,9 @@ function compareCsv() {
     rows.push([], ["문서", "구분", `${results[0].start} 판`, `${results[1].start} 판`, "근거"]);
     diff.forEach(x => {
       if (x.missing) return rows.push([x.type, "비교 불가", x.missing]);
-      x.changed.forEach(c => rows.push([x.type, "변경", c.from.text, c.to.text, `p.${c.from.page} → p.${c.to.page}`]));
-      x.removed.forEach(l => rows.push([x.type, "삭제", l.text, "", `p.${l.page}`]));
-      x.added.forEach(l => rows.push([x.type, "추가", "", l.text, `p.${l.page}`]));
+      x.changed.forEach(c => rows.push([x.type, "변경", c.from.text, c.to.text, `${docLoc(c.from.doc, c.from.page)} → ${docLoc(c.to.doc, c.to.page)}`]));
+      x.removed.forEach(l => rows.push([x.type, "삭제", l.text, "", docLoc(l.doc, l.page)]));
+      x.added.forEach(l => rows.push([x.type, "추가", "", l.text, docLoc(l.doc, l.page)]));
     });
   }
   return "﻿" + rows.map(r => r.map(q).join(",")).join("\r\n");
@@ -3035,7 +3428,7 @@ const AI_CONCEPTS = {
 // 이율은 첫 숫자 하나가 아니라 같은 이율 항목 안의 '기간 구간 + 서로 다른 %'를 확인한다.
 // PDF 표가 줄·열 순서로 풀린 경우도 읽되, 다음 이율 항목/조항으로 넘어가 값을 섞지 않는다.
 const RATE_LABEL_RE = /최저보증이율|최저보증금리|평균공시이율|보험계약대출이율|계약대출이율|연체이율|적립이율|예정이율|적용(?:되는|하는|한)?이율|공시이율|확정이율|확정금리|지연이자|지급지연|지연이율/g;
-const RATE_BAND_RE = /\d+(?:년|개월)?[~∼～\-]\d+(?:년|개월)(?:이내|이하|미만|까지)?|(?:계약일(?:부터|로부터)?[~∼～\-]?)?(?:최초)?\d+(?:년|개월)(?:(?:이상|초과|부터|경과후|경과|후)?(?:[~∼～\-]|부터)?\d+(?:년|개월))?(?:이내|이하|미만|이전|이후|초과|이상|까지|부터|간|경과후|경과시점|경과|후|전|만기)|제[12](?:보험기간|기간)|(?:보험료)?납입기간(?:중|이내|이후|후)|납입(?:완료|종료)(?:이전|이후|전|후)/g;
+const RATE_BAND_RE = /\d+(?:년|개월)?[~∼～\-]\d+(?:년|개월)(?:이내|이하|미만|까지)?|(?:계약일(?:부터|로부터)?[~∼～\-]?)?(?:최초)?\d+(?:년|개월)(?:(?:이상|초과|부터|경과후|경과|후)?(?:[~∼～\-]|부터)?\d+(?:년|개월))?(?:이내|이하|미만|이전|이후|초과|이상|까지|부터|간|경과후|경과시점|경과|후|전|만기|[을이가](?:초과|경과)(?:하는경우|하는|한후|후)?)|제[12](?:보험기간|기간)|(?:보험료)?납입기간(?:중|이내|이후|후)|납입(?:완료|종료)(?:이전|이후|전|후)/g;
 const RATE_PERCENT_RE = /(?<![\d.])\d+(?:\.\d+)?[%％]/g;
 
 function rateScheduleHit(text, kind) {
@@ -4159,8 +4552,8 @@ function factsFor(result) {
     상품: result.products.slice(0, 25).map(x => {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
       return { 상품명: x.name, 분류: x.kind, 판매상태: x.status, 최신판매일자: x.latest.start,
-        ...(v ? { [p.field]: f.text ? v.value : `${v.value}${f.unit}`, 근거: `${v.doc.docType} p.${v.page}` } : p.field ? { [p.field]: "문서에서 못 찾음" } : {}),
-        ...(ev ? { 근거문장: ev[0].text.slice(0, AI_CONCEPTS[p.concept]?.rate ? 900 : 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}${ev[0].endPage > ev[0].page ? "~" + ev[0].endPage : ""}` } : {}),
+        ...(v ? { [p.field]: f.text ? v.value : `${v.value}${f.unit}`, 근거: `${v.doc.docType} ${docLoc(v.doc, v.page)}` } : p.field ? { [p.field]: "문서에서 못 찾음" } : {}),
+        ...(ev ? { 근거문장: ev[0].text.slice(0, AI_CONCEPTS[p.concept]?.rate ? 900 : 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) ${docLoc(ev[0].doc, ev[0].page)}${ev[0].endPage > ev[0].page ? "~" + ev[0].endPage : ""}` } : {}),
         ...(result.itemEv && result.itemEv.get(x.key) ? { [result.itemLabel || p.item]: result.itemEv.get(x.key).text.slice(0, 220) } : {}) };
     }),
   };
@@ -4176,7 +4569,7 @@ function templateAnswer(result) {
   if (p.action === "explain") return "연결된 기초서류에서 답할 수 있는 질문(개수·목록·평균·문서 내용 찾기)이 아닙니다. 용어 설명 같은 질문은 로컬 AI가 연결되어 있을 때 답합니다.";
   if (result.detail) {
     const x = result.products[0], e = result.detail.ev;
-    return e.doc ? `${x.name}의 ${e.doc.docType}(${result.detail.v.start}) p.${e.page} 원문: "${e.text}"` : `${x.name}의 문서에서 '${result.detail.words.join(" ")}'을(를) 찾지 못했습니다. 아래 기초서류를 열어 확인하세요.`;
+    return e.doc ? `${x.name}의 ${e.doc.docType}(${result.detail.v.start}) ${docLoc(e.doc, e.page)} 원문: "${e.text}"` : `${x.name}의 문서에서 '${result.detail.words.join(" ")}'을(를) 찾지 못했습니다. 아래 기초서류를 열어 확인하세요.`;
   }
   if (!result.total) return p.action === "count" ? `조건(${cond})에 맞는 상품은 0개입니다.` : `조건(${cond})에 맞는 상품을 찾지 못했습니다.`;
   let s = `조건(${cond})에 맞는 상품은 ${result.total}개입니다.`;
@@ -4184,7 +4577,7 @@ function templateAnswer(result) {
   if (f && !f.text) {
     const found = result.products.filter(x => result.values.get(x.key));
     const valOf = x => `${result.values.get(x.key).value}${f.unit}`;
-    const src = x => { const v = result.values.get(x.key); return `${v.doc.docType}(${v.start}) p.${v.page}`; };
+    const src = x => { const v = result.values.get(x.key); return `${v.doc.docType}(${v.start}) ${docLoc(v.doc, v.page)}`; };
     const fname = p.field + (f.note ? `(${f.note})` : "");
     if (!found.length) s += ` 그중 문서에서 ${p.field} 값을 찾은 상품이 없습니다.`;
     else if (found.length === 1) s += ` ${found[0].name}의 ${fname}은 ${valOf(found[0])}입니다(${src(found[0])}).`;
@@ -4238,11 +4631,11 @@ function resultHtml(result) {
     (p.field ? `<th>${esc(p.field)}</th>` : "") + (result.evidence.size ? `<th>근거 문장</th>` : "") + (result.itemEv ? `<th>${esc(result.itemLabel || [p.item, ...p.also.filter(c => c.item).map(c => c.item)].filter(Boolean).join(" · "))}</th>` : "") + `<th>기초서류</th></tr></thead><tbody>` +
     result.products.slice(0, MAX).map((x, i) => {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
-      const link = (d, page, label) => `<a href="#" data-open="${DOCS.indexOf(d)}" data-page="${page}">${esc(label)}</a>`;
-      const vCell = !p.field ? "" : `<td>${v ? `<b>${esc(f.text ? v.value : v.value + f.unit)}</b><div class="path">${link(v.doc, v.page, `${v.doc.docType}(${v.start}) p.${v.page}`)}${v.latest ? "" : " · 이전 판"}</div>` : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
-      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}`)}${ev[0].endPage > ev[0].page ? ` · ${link(ev[0].doc, ev[0].endPage, `p.${ev[0].endPage}`)}` : ""}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
+      const link = (d, page, label, anchor = "") => `<a href="#" ${refAttrs(d, page, anchor)}>${esc(label)}</a>`;
+      const vCell = !p.field ? "" : `<td>${v ? `<b>${esc(f.text ? v.value : v.value + f.unit)}</b><div class="path">${link(v.doc, v.page, `${v.doc.docType}(${v.start}) ${docLoc(v.doc, v.page)}`, v.text)}${v.latest ? "" : " · 이전 판"}</div>` : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
+      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) ${docLoc(ev[0].doc, ev[0].page)}`, ev[0].text)}${ev[0].endPage > ev[0].page ? ` · ${link(ev[0].doc, ev[0].endPage, docLoc(ev[0].doc, ev[0].endPage), ev[0].text.slice(-200))}` : ""}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
       const iv = result.itemEv ? result.itemEv.get(x.key) : null;
-      const iCell = !result.itemEv ? "" : `<td>${iv ? (iv.doc ? `${link(iv.doc, iv.page, `${iv.doc.docType}(${iv.doc.start || "?"}) p.${iv.page}`)}${iv.old ? " · 이전 판" : ""} ` : "") + highlight(iv.text.slice(0, 600), iv.matched || []) : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
+      const iCell = !result.itemEv ? "" : `<td>${iv ? (iv.doc ? `${link(iv.doc, iv.page, `${iv.doc.docType}(${iv.doc.start || "?"}) ${docLoc(iv.doc, iv.page)}`, iv.text)}${iv.old ? " · 이전 판" : ""} ` : "") + highlight(iv.text.slice(0, 600), iv.matched || []) : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
       return `<tr${i >= SHOW ? ' class="ai-more" hidden' : ""}><td><button type="button" class="linkbtn" data-analyze="${esc(x.key)}" data-start="${esc(x.latest.start)}">${esc(x.name)}</button></td>` +
         `<td>${esc(x.kind)}</td><td>${stBadge(x.status, x.latest.statusBy)}</td><td>${esc(x.latest.start || "")}</td>${vCell}${eCell}${iCell}<td>${docLinksHtml(x.latest.docs)}</td></tr>`;
     }).join("") + `</tbody></table></div>` +

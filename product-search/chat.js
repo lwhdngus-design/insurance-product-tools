@@ -83,7 +83,7 @@ const AI_CONCEPTS = {
 // 이율은 첫 숫자 하나가 아니라 같은 이율 항목 안의 '기간 구간 + 서로 다른 %'를 확인한다.
 // PDF 표가 줄·열 순서로 풀린 경우도 읽되, 다음 이율 항목/조항으로 넘어가 값을 섞지 않는다.
 const RATE_LABEL_RE = /최저보증이율|최저보증금리|평균공시이율|보험계약대출이율|계약대출이율|연체이율|적립이율|예정이율|적용(?:되는|하는|한)?이율|공시이율|확정이율|확정금리|지연이자|지급지연|지연이율/g;
-const RATE_BAND_RE = /\d+(?:년|개월)?[~∼～\-]\d+(?:년|개월)(?:이내|이하|미만|까지)?|(?:계약일(?:부터|로부터)?[~∼～\-]?)?(?:최초)?\d+(?:년|개월)(?:(?:이상|초과|부터|경과후|경과|후)?(?:[~∼～\-]|부터)?\d+(?:년|개월))?(?:이내|이하|미만|이전|이후|초과|이상|까지|부터|간|경과후|경과시점|경과|후|전|만기)|제[12](?:보험기간|기간)|(?:보험료)?납입기간(?:중|이내|이후|후)|납입(?:완료|종료)(?:이전|이후|전|후)/g;
+const RATE_BAND_RE = /\d+(?:년|개월)?[~∼～\-]\d+(?:년|개월)(?:이내|이하|미만|까지)?|(?:계약일(?:부터|로부터)?[~∼～\-]?)?(?:최초)?\d+(?:년|개월)(?:(?:이상|초과|부터|경과후|경과|후)?(?:[~∼～\-]|부터)?\d+(?:년|개월))?(?:이내|이하|미만|이전|이후|초과|이상|까지|부터|간|경과후|경과시점|경과|후|전|만기|[을이가](?:초과|경과)(?:하는경우|하는|한후|후)?)|제[12](?:보험기간|기간)|(?:보험료)?납입기간(?:중|이내|이후|후)|납입(?:완료|종료)(?:이전|이후|전|후)/g;
 const RATE_PERCENT_RE = /(?<![\d.])\d+(?:\.\d+)?[%％]/g;
 
 function rateScheduleHit(text, kind) {
@@ -1207,8 +1207,8 @@ function factsFor(result) {
     상품: result.products.slice(0, 25).map(x => {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
       return { 상품명: x.name, 분류: x.kind, 판매상태: x.status, 최신판매일자: x.latest.start,
-        ...(v ? { [p.field]: f.text ? v.value : `${v.value}${f.unit}`, 근거: `${v.doc.docType} p.${v.page}` } : p.field ? { [p.field]: "문서에서 못 찾음" } : {}),
-        ...(ev ? { 근거문장: ev[0].text.slice(0, AI_CONCEPTS[p.concept]?.rate ? 900 : 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}${ev[0].endPage > ev[0].page ? "~" + ev[0].endPage : ""}` } : {}),
+        ...(v ? { [p.field]: f.text ? v.value : `${v.value}${f.unit}`, 근거: `${v.doc.docType} ${docLoc(v.doc, v.page)}` } : p.field ? { [p.field]: "문서에서 못 찾음" } : {}),
+        ...(ev ? { 근거문장: ev[0].text.slice(0, AI_CONCEPTS[p.concept]?.rate ? 900 : 220), 문장근거: `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) ${docLoc(ev[0].doc, ev[0].page)}${ev[0].endPage > ev[0].page ? "~" + ev[0].endPage : ""}` } : {}),
         ...(result.itemEv && result.itemEv.get(x.key) ? { [result.itemLabel || p.item]: result.itemEv.get(x.key).text.slice(0, 220) } : {}) };
     }),
   };
@@ -1224,7 +1224,7 @@ function templateAnswer(result) {
   if (p.action === "explain") return "연결된 기초서류에서 답할 수 있는 질문(개수·목록·평균·문서 내용 찾기)이 아닙니다. 용어 설명 같은 질문은 로컬 AI가 연결되어 있을 때 답합니다.";
   if (result.detail) {
     const x = result.products[0], e = result.detail.ev;
-    return e.doc ? `${x.name}의 ${e.doc.docType}(${result.detail.v.start}) p.${e.page} 원문: "${e.text}"` : `${x.name}의 문서에서 '${result.detail.words.join(" ")}'을(를) 찾지 못했습니다. 아래 기초서류를 열어 확인하세요.`;
+    return e.doc ? `${x.name}의 ${e.doc.docType}(${result.detail.v.start}) ${docLoc(e.doc, e.page)} 원문: "${e.text}"` : `${x.name}의 문서에서 '${result.detail.words.join(" ")}'을(를) 찾지 못했습니다. 아래 기초서류를 열어 확인하세요.`;
   }
   if (!result.total) return p.action === "count" ? `조건(${cond})에 맞는 상품은 0개입니다.` : `조건(${cond})에 맞는 상품을 찾지 못했습니다.`;
   let s = `조건(${cond})에 맞는 상품은 ${result.total}개입니다.`;
@@ -1232,7 +1232,7 @@ function templateAnswer(result) {
   if (f && !f.text) {
     const found = result.products.filter(x => result.values.get(x.key));
     const valOf = x => `${result.values.get(x.key).value}${f.unit}`;
-    const src = x => { const v = result.values.get(x.key); return `${v.doc.docType}(${v.start}) p.${v.page}`; };
+    const src = x => { const v = result.values.get(x.key); return `${v.doc.docType}(${v.start}) ${docLoc(v.doc, v.page)}`; };
     const fname = p.field + (f.note ? `(${f.note})` : "");
     if (!found.length) s += ` 그중 문서에서 ${p.field} 값을 찾은 상품이 없습니다.`;
     else if (found.length === 1) s += ` ${found[0].name}의 ${fname}은 ${valOf(found[0])}입니다(${src(found[0])}).`;
@@ -1286,11 +1286,11 @@ function resultHtml(result) {
     (p.field ? `<th>${esc(p.field)}</th>` : "") + (result.evidence.size ? `<th>근거 문장</th>` : "") + (result.itemEv ? `<th>${esc(result.itemLabel || [p.item, ...p.also.filter(c => c.item).map(c => c.item)].filter(Boolean).join(" · "))}</th>` : "") + `<th>기초서류</th></tr></thead><tbody>` +
     result.products.slice(0, MAX).map((x, i) => {
       const v = result.values.get(x.key), ev = result.evidence.get(x.key);
-      const link = (d, page, label) => `<a href="#" data-open="${DOCS.indexOf(d)}" data-page="${page}">${esc(label)}</a>`;
-      const vCell = !p.field ? "" : `<td>${v ? `<b>${esc(f.text ? v.value : v.value + f.unit)}</b><div class="path">${link(v.doc, v.page, `${v.doc.docType}(${v.start}) p.${v.page}`)}${v.latest ? "" : " · 이전 판"}</div>` : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
-      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) p.${ev[0].page}`)}${ev[0].endPage > ev[0].page ? ` · ${link(ev[0].doc, ev[0].endPage, `p.${ev[0].endPage}`)}` : ""}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
+      const link = (d, page, label, anchor = "") => `<a href="#" ${refAttrs(d, page, anchor)}>${esc(label)}</a>`;
+      const vCell = !p.field ? "" : `<td>${v ? `<b>${esc(f.text ? v.value : v.value + f.unit)}</b><div class="path">${link(v.doc, v.page, `${v.doc.docType}(${v.start}) ${docLoc(v.doc, v.page)}`, v.text)}${v.latest ? "" : " · 이전 판"}</div>` : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
+      const eCell = !result.evidence.size ? "" : `<td>${ev ? `${link(ev[0].doc, ev[0].page, `${ev[0].doc.docType}(${ev[0].doc.start || "?"}) ${docLoc(ev[0].doc, ev[0].page)}`, ev[0].text)}${ev[0].endPage > ev[0].page ? ` · ${link(ev[0].doc, ev[0].endPage, docLoc(ev[0].doc, ev[0].endPage), ev[0].text.slice(-200))}` : ""}${ev[0].latest === false ? " · 이전 판" : ""} ${highlight(ev[0].text, ev[0].matched)}` : ""}</td>`;
       const iv = result.itemEv ? result.itemEv.get(x.key) : null;
-      const iCell = !result.itemEv ? "" : `<td>${iv ? (iv.doc ? `${link(iv.doc, iv.page, `${iv.doc.docType}(${iv.doc.start || "?"}) p.${iv.page}`)}${iv.old ? " · 이전 판" : ""} ` : "") + highlight(iv.text.slice(0, 600), iv.matched || []) : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
+      const iCell = !result.itemEv ? "" : `<td>${iv ? (iv.doc ? `${link(iv.doc, iv.page, `${iv.doc.docType}(${iv.doc.start || "?"}) ${docLoc(iv.doc, iv.page)}`, iv.text)}${iv.old ? " · 이전 판" : ""} ` : "") + highlight(iv.text.slice(0, 600), iv.matched || []) : `<span class="muted">문서에서 못 찾음</span>`}</td>`;
       return `<tr${i >= SHOW ? ' class="ai-more" hidden' : ""}><td><button type="button" class="linkbtn" data-analyze="${esc(x.key)}" data-start="${esc(x.latest.start)}">${esc(x.name)}</button></td>` +
         `<td>${esc(x.kind)}</td><td>${stBadge(x.status, x.latest.statusBy)}</td><td>${esc(x.latest.start || "")}</td>${vCell}${eCell}${iCell}<td>${docLinksHtml(x.latest.docs)}</td></tr>`;
     }).join("") + `</tbody></table></div>` +

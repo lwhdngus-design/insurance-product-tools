@@ -52,6 +52,10 @@ python hanalife_download.py --out "D:\기존 상품기초서류"
 
 검색 앱은 PDF.js와 Python 기본 라이브러리로 동작합니다. 로컬 AI(Ollama)는 선택 사항이며, 다운로드와 업데이트를 제외한 검색·분석은 오프라인으로 사용할 수 있습니다.
 
+## 내부망 Word 기초서류 사용
+
+기존 Word·PDF 혼합 폴더를 `start-search.bat`으로 연결합니다. DOCX·HWPX 본문은 직접 색인하고 Word 원문 그림은 필요할 때 설치된 문서 프로그램으로 미리보기 캐시를 만듭니다. 산출방법서·요율확인의뢰서는 내용 분석 없이 상품별 원본 링크로 표시합니다. [지원 형식·문서 프로그램·업데이트 안내](product-search/README.md#2026-11-20-word-원본-연결과-링크-전용-서류).
+
 ## 기초서류를 500MB 미만으로 나눠 내부망에 옮기기
 
 [전송 도구 ZIP 직접 받기](https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/documents-transfer-500MB.zip)

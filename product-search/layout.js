@@ -2,7 +2,7 @@
 // 상품 목록 판매상태 탭, 기초서류 연결 현황, 교육용 자료 내려받기
 
 // 앱 버전 (업데이트가 반영됐는지 기초서류 연결 화면에서 확인)
-const APP_VERSION = "2026-10-27 · 보험기간·경과기간별 적용이율 검색";
+const APP_VERSION = "2026-11-20 · Word 원본 검색·분석·그림 보기 · 산출방법서·요율확인의뢰서 링크";
 $("appVersion").textContent = APP_VERSION;
 
 // ---------- 화면 전환 ----------
@@ -62,9 +62,10 @@ function renderConnectStats() {
   const products = new Set(DOCS.map(productKeyOf)).size;
   const dates = new Set(DOCS.map(d => d.start).filter(Boolean)).size;
   const errors = DOCS.filter(d => d.error).length;
-  $("connectStats").innerHTML = `PDF <b>${DOCS.length}</b>개 · 상품 <b>${products}</b>개 · 판매일자 ${dates}개<br>` +
+  $("connectStats").innerHTML = `문서 <b>${DOCS.length}</b>개 · 상품 <b>${products}</b>개 · 판매일자 ${dates}개<br>` +
     ["사업방법서", "상품요약서", "약관"].map(t => `${t} ${count(t)}`).join(" · ") +
-    (DOCS.length - count("사업방법서") - count("상품요약서") - count("약관") ? ` · 기타 ${DOCS.length - count("사업방법서") - count("상품요약서") - count("약관")}` : "") +
+    LINK_DOC_TYPES.map(t => ` · ${t} ${count(t)} (링크 전용)`).join("") +
+    (DOCS.some(d => isWord(d) && !isLinkOnly(d)) ? `<div class="note">DOCX·HWPX는 원본 본문을 읽습니다. Word 원문 그림 보기/DOC 읽기: Windows Word 또는 LibreOffice 필요. HWP 그림 보기/읽기: LibreOffice 또는 PDF 사본 필요.</div>` : "") +
     (errors ? `<div class="warn">본문을 못 읽은 파일 ${errors}개 (스캔 이미지 PDF 등)</div>` : "");
 }
 // 불러오기 상태가 바뀔 때마다 연결 현황 갱신
@@ -200,9 +201,9 @@ async function showDocPage(d, page) {
     const cv = document.createElement("canvas");
     cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
     await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
-    const nav = (p, label) => p >= 1 && p <= pdf.numPages ? `<button type="button" class="mini" data-open="${DOCS.indexOf(d)}" data-page="${p}">${label}</button>` : "";
+    const nav = (p, label) => p >= 1 && p <= pdf.numPages ? `<button type="button" class="mini" ${refAttrs(d, p)}>${label}</button>` : "";
     $("modalBody").innerHTML = `<div class="modal-col"><div class="buttons" style="margin-bottom:8px">${nav(n - 1, "이전 쪽")}${nav(n + 1, "다음 쪽")}
-      <span class="note">${n} / ${pdf.numPages}쪽 · ${esc(d.path)}</span></div><img src="${cv.toDataURL("image/jpeg", 0.88)}" alt="${esc(d.docType)} p.${n}"></div>`;
+      <span class="note">${n} / ${pdf.numPages}쪽 · ${esc(d.path)}</span>${isWord(d) ? `<button type="button" data-original="${DOCS.indexOf(d)}">원본 ${d.format.toUpperCase()} 열기</button>` : ""}</div>${isWord(d) ? `<p class="note">${esc(d.renderer || "문서 프로그램")}로 만든 미리보기입니다. 설치된 글꼴·문서 프로그램에 따라 원본 Word의 페이지 배치와 다를 수 있습니다. ${esc(d.locationNotice || "")}</p>` : ""}<img src="${cv.toDataURL("image/jpeg", 0.88)}" alt="${esc(d.docType)} p.${n}"></div>`;
   } catch (err) {
     $("modalBody").innerHTML = `<p class="warn">PDF를 그리지 못했습니다: ${esc(err.message)}</p>`;
   }

@@ -2,7 +2,9 @@
 import importlib.util
 import tempfile
 import unittest
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 spec = importlib.util.spec_from_file_location("search_server", Path(__file__).resolve().parents[1] / "serve.py")
 server = importlib.util.module_from_spec(spec)

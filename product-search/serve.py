@@ -26,7 +26,11 @@ import urllib.request
 import shutil
 import subprocess
 import webbrowser
+import mimetypes
+import zipfile
+from xml.etree import ElementTree as ET
 from pathlib import Path
+import word_docs
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG = APP_DIR / "docs-folder.txt"
@@ -49,7 +53,7 @@ def norm(s):
 # ---------- 폴더 설정 ----------
 def ask_folder():
     while True:
-        raw = input("기초서류 PDF 폴더 경로를 붙여넣고 Enter\n"
+        raw = input("기초서류 Word·PDF 폴더 경로를 붙여넣고 Enter\n"
                     "(탐색기에서 기초서류 폴더를 열고 주소창 경로를 복사. 예: C:\\Users\\user\\Desktop\\insurance-product-tools\\doc_sample)\n> ")
         p = Path(raw.strip().strip('"'))
         if p.is_dir():
@@ -89,6 +93,10 @@ def init_db():
           CREATE TABLE IF NOT EXISTS tags(doc_id INT, feature_id TEXT, evidence TEXT, PRIMARY KEY(doc_id, feature_id));
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
         """)
+        columns = {r[1] for r in c.execute("PRAGMA table_info(docs)")}
+        for name, default in (("text_kind", "page"), ("fingerprint", ""), ("reader_version", "")):
+            if name not in columns:
+                c.execute(f"ALTER TABLE docs ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
         # 공백을 뺀 본문을 3글자 단위로 색인 (부분 일치 검색용, 본문은 pages 테이블에만 저장)
         c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(compact, tokenize='trigram', detail='none', content='')")
 
@@ -170,25 +178,25 @@ def ensure_tags():
             print(f"특징 사전이 바뀌어 특징 태그를 다시 계산합니다 ({len(docs)}개 문서)...")
         for doc_id, path in docs:
             pages = [t for (t,) in c.execute("SELECT text FROM pages WHERE doc_id=? ORDER BY page_no", (doc_id,))]
-            write_tags(c, doc_id, doc_tags(path, pages, feats))
+            write_tags(c, doc_id, {} if word_docs.link_only(path) else doc_tags(path, pages, feats))
         c.execute("INSERT OR REPLACE INTO meta VALUES('features_hash', ?)", (h,))
 
 
 def index_doc(item):
     """브라우저가 보낸 추출 결과 저장: {path, size, mtime, pages, error}"""
     feats, _ = load_features()
-    pages = [p or "" for p in item.get("pages") or []]
+    pages = [] if word_docs.link_only(item["path"]) else [p or "" for p in item.get("pages") or []]
     with WRITE_LOCK, connect() as c:
         old = c.execute("SELECT id FROM docs WHERE path=?", (item["path"],)).fetchone()
         if old:
             delete_doc(c, old[0])
-        cur = c.execute("INSERT INTO docs(path, size, mtime, error, n_pages) VALUES(?,?,?,?,?)",
-                        (item["path"], item["size"], item["mtime"], item.get("error") or "", len(pages)))
+        cur = c.execute("INSERT INTO docs(path,size,mtime,error,n_pages,text_kind,fingerprint,reader_version) VALUES(?,?,?,?,?,?,?,?)",
+                        (item["path"], item["size"], item["mtime"], item.get("error") or "", len(pages), item.get("text_kind", "page"), item.get("fingerprint", ""), item.get("reader_version", "")))
         doc_id = cur.lastrowid
         for i, t in enumerate(pages):
             pid = c.execute("INSERT INTO pages(doc_id, page_no, text) VALUES(?,?,?)", (doc_id, i + 1, t)).lastrowid
             c.execute("INSERT INTO pages_fts(rowid, compact) VALUES(?,?)", (pid, norm(t)))
-        tags = doc_tags(item["path"], pages, feats)
+        tags = {} if word_docs.link_only(item["path"]) else doc_tags(item["path"], pages, feats)
         write_tags(c, doc_id, tags)
     return {"id": doc_id, "features": tags, "error": item.get("error") or "", "n_pages": len(pages)}
 
@@ -211,15 +219,19 @@ def import_json_cache():
 # ---------- 목록 ----------
 def list_docs(root):
     on_disk = {}
-    for dirpath, _, names in os.walk(root):
+    for dirpath, directories, names in os.walk(root):
+        directories[:] = sorted(d for d in directories if d not in {".docs-cache", ".git"})
         for n in sorted(names):
-            if n.lower().endswith(".pdf"):
+            if Path(n).suffix.lower() in word_docs.EXTENSIONS and not n.startswith("~$"):
                 full = Path(dirpath) / n
+                if root not in full.resolve().parents:
+                    continue
                 st = full.stat()
                 rel = root.name + "/" + full.relative_to(root).as_posix()  # 폴더 선택 방식과 같은 경로 형태
-                on_disk[rel] = (st.st_size, int(st.st_mtime))
+                is_pdf = full.suffix.lower() == ".pdf"
+                on_disk[rel] = (st.st_size, int(st.st_mtime) if is_pdf else st.st_mtime_ns, "" if is_pdf or word_docs.link_only(full) else word_docs.fingerprint(full))
     with connect() as c:
-        rows = {p: (i, s, m, e, n) for i, p, s, m, e, n in c.execute("SELECT id, path, size, mtime, error, n_pages FROM docs")}
+        rows = {p: (i, s, m, e, n, kind, fp, reader) for i, p, s, m, e, n, kind, fp, reader in c.execute("SELECT id,path,size,mtime,error,n_pages,text_kind,fingerprint,reader_version FROM docs")}
         tags = {}
         for doc_id, fid, ev in c.execute("SELECT doc_id, feature_id, evidence FROM tags"):
             tags.setdefault(doc_id, {})[fid] = json.loads(ev)
@@ -231,11 +243,14 @@ def list_docs(root):
             for doc_id in gone:
                 delete_doc(c, doc_id)
     files = []
-    for rel, (size, mtime) in on_disk.items():
-        item = {"path": rel, "size": size, "mtime": mtime, "indexed": False}
+    for rel, (size, mtime, fingerprint) in on_disk.items():
+        is_pdf = Path(rel).suffix.lower() == ".pdf"
+        kind = "link" if word_docs.link_only(rel) else "page" if is_pdf else "section"
+        # Nanoseconds exceed JavaScript's exact integer range; transport Word times as strings.
+        item = {"path": rel, "size": size, "mtime": mtime if is_pdf else str(mtime), "fingerprint": fingerprint, "text_kind": kind, "indexed": False}
         r = rows.get(rel)
-        if r and r[1] == size and r[2] == mtime:
-            item.update(id=r[0], indexed=True, error=r[3] or "", n_pages=r[4], features=tags.get(r[0], {}))
+        if r and r[1] == size and r[2] == mtime and r[6] == fingerprint and (is_pdf or (r[7] == word_docs.READER_VERSION and not r[3])) and (kind != "link" or r[5] == "link"):
+            item.update(id=r[0], indexed=True, error=r[3] or "", n_pages=r[4], text_kind=r[5], features=tags.get(r[0], {}))
         files.append(item)
     return {"root": root.name, "folder": str(root), "files": files}
 
@@ -485,9 +500,20 @@ def make_handler(root):
             if len(parts) != 2 or parts[0] != root.name:
                 return None
             p = (root / parts[1]).resolve()
-            return p if p.is_file() and p.suffix.lower() == ".pdf" and root in p.parents else None
+            return p if p.is_file() and p.suffix.lower() in word_docs.EXTENSIONS and root in p.parents else None
+
+        def send_document(self, path, content_type=None):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(path.stat().st_size))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with path.open("rb") as stream:
+                shutil.copyfileobj(stream, self.wfile)
 
         def do_GET(self):
+            if urllib.parse.urlsplit("http://" + self.headers.get("Host", "")).hostname not in {"127.0.0.1", "localhost", "::1"}:
+                return self.send_error(403)
             url = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(url.query)
             if url.path == "/api/docs":
@@ -501,24 +527,62 @@ def make_handler(root):
                 p = self.doc_path(urllib.parse.unquote(url.path[len("/docs/"):]))
                 if not p:
                     return self.send_error(404)
-                data = p.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/pdf")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                return
+                return self.send_document(p)
+            if url.path.startswith("/previews/"):
+                name = url.path[len("/previews/"):]
+                if not re.fullmatch(r"[0-9a-f]{64}\.pdf", name):
+                    return self.send_error(404)
+                p = CACHE_DIR / "previews" / name
+                if not p.is_file():
+                    return self.send_error(404)
+                return self.send_document(p, "application/pdf")
             if url.path.startswith("/.docs-cache") or url.path.endswith("docs-folder.txt"):
                 return self.send_error(404)
             return super().do_GET()
 
         def do_POST(self):
+            nonlocal root
+            if urllib.parse.urlsplit("http://" + self.headers.get("Host", "")).hostname not in {"127.0.0.1", "localhost", "::1"}:
+                return self.send_error(403)
             path = urllib.parse.urlparse(self.path).path
             try:
+                origin = self.headers.get("Origin")
+                if origin and origin != "http://" + self.headers.get("Host", ""):
+                    return self.send_json({"error": "이 앱에서 직접 요청해 주세요."}, 403)
                 body = self.read_json()
+                if path == "/api/set_folder":
+                    value = str(body.get("folder", "")).strip().strip('"')
+                    if not value:
+                        raise ValueError("연결할 폴더 경로를 입력해 주세요.")
+                    selected = Path(value).expanduser().resolve(strict=True)
+                    if not selected.is_dir():
+                        raise ValueError("폴더 경로를 입력해 주세요.")
+                    CONFIG.write_text(str(selected), encoding="utf-8")
+                    root = selected
+                    return self.send_json({"folder": str(root)})
+                if path in {"/api/read_document", "/api/preview", "/api/open_original"}:
+                    p = self.doc_path(body["path"])
+                    if not p:
+                        return self.send_json({"error": "연결 폴더 안의 문서만 열 수 있습니다."}, 400)
+                    if path == "/api/open_original":
+                        if os.name == "nt":
+                            os.startfile(str(p))
+                            return self.send_json({"opened": True})
+                        return self.send_json({"opened": False})
+                    if word_docs.link_only(p):
+                        return self.send_json({"error": "이 문서는 원본 링크 전용입니다."}, 400)
+                    if path == "/api/read_document":
+                        if p.suffix.lower() not in word_docs.NATIVE_EXTENSIONS:
+                            return self.send_json({"error": "이 형식은 미리보기 변환이 필요합니다."}, 400)
+                        return self.send_json(word_docs.read_native(p))
+                    rendered = word_docs.preview(p, CACHE_DIR / "previews")
+                    return self.send_json({"url": "previews/" + rendered["path"].name, "renderer": rendered["renderer"], "fingerprint": rendered["fingerprint"]})
                 if path == "/api/index":
-                    if not self.doc_path(body["path"]):
+                    p = self.doc_path(body["path"])
+                    if not p:
                         return self.send_json({"error": "폴더 밖 경로"}, 400)
+                    if p.suffix.lower() != ".pdf" and not word_docs.link_only(p) and word_docs.fingerprint(p) != body.get("fingerprint"):
+                        return self.send_json({"error": "읽는 중 원본이 변경됐습니다. 새로고침해 주세요."}, 409)
                     return self.send_json(index_doc(body))
                 if path == "/api/search":
                     return self.send_json({"ids": search_ids(body.get("terms", []))})
@@ -533,8 +597,10 @@ def make_handler(root):
                 if path == "/api/snippets":
                     res = snippets_for([int(i) for i in body.get("ids", [])][:300], body.get("terms", []))
                     return self.send_json({"snippets": {str(k): v for k, v in res.items()}})
-            except (ValueError, KeyError, TypeError, OSError, sqlite3.Error, urllib.error.URLError) as e:
+            except (ValueError, KeyError, TypeError, OSError, sqlite3.Error, urllib.error.URLError, zipfile.BadZipFile) as e:
                 return self.send_json({"error": str(e)}, 400)
+            except (subprocess.SubprocessError, ET.ParseError):
+                return self.send_json({"error": "문서 읽기/미리보기 변환에 실패했습니다. Word/LibreOffice 설치와 파일의 보호·열기 상태를 확인해 주세요."}, 400)
             return self.send_error(404)
 
     return Handler
@@ -584,7 +650,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def main():
     ap = argparse.ArgumentParser(description="기초서류 폴더 자동 연결 실행기")
-    ap.add_argument("--folder", help="기초서류 PDF 폴더 경로 (한 번 지정하면 저장됨)")
+    ap.add_argument("--folder", help="기초서류 Word·PDF 폴더 경로 (한 번 지정하면 저장됨)")
     ap.add_argument("--sample", action="store_true",
                     help="교육용 가상 샘플 폴더(sample-기초서류폴더)로 실행 (저장된 폴더 설정은 바꾸지 않음)")
     ap.add_argument("--port", type=int, default=8765)

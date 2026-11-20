@@ -81,7 +81,7 @@ function revisionDiff(key, oldStart, newStart) {
 
 // ---------- 화면 ----------
 const MAX_DIFF_LINES = 60;
-const refLink = l => `<a href="#" class="ref" data-open="${DOCS.indexOf(l.doc)}" data-page="${l.page}">(${esc(l.doc.docType)} p.${l.page})</a>`;
+const refLink = l => `<a href="#" class="ref" ${refAttrs(l.doc, l.page, l.text)}>(${esc(l.doc.docType)} ${docLoc(l.doc, l.page)})</a>`;
 
 async function showCompare() {
   if (TRAY.length < 2) return;
@@ -93,6 +93,7 @@ async function showCompare() {
   try {
     const cdocs = DOCS.filter(d => items.some(t => productKeyOf(d) === t.key && d.start === t.start));
     await ensurePages(cdocs);
+    await prepareWordPreviews(cdocs.filter(d => SOURCE_TYPES.includes(d.docType)));
     await prepareTables(cdocs);
     await prepareSections(cdocs);
   } catch (e) {
@@ -170,9 +171,9 @@ function compareMarkdown() {
     diff.forEach(x => {
       out.push("", `### ${x.type}`);
       if (x.missing) return out.push(`- 비교 불가: ${x.missing}`);
-      x.changed.forEach(c => out.push(`- 변경: ${c.from.text} → ${c.to.text} (${c.to.doc.docType} p.${c.to.page})`));
-      x.removed.forEach(l => out.push(`- 삭제: ${l.text} (${l.doc.docType} p.${l.page})`));
-      x.added.forEach(l => out.push(`- 추가: ${l.text} (${l.doc.docType} p.${l.page})`));
+      x.changed.forEach(c => out.push(`- 변경: ${c.from.text} → ${c.to.text} (${c.to.doc.docType} ${docLoc(c.to.doc, c.to.page)})`));
+      x.removed.forEach(l => out.push(`- 삭제: ${l.text} (${l.doc.docType} ${docLoc(l.doc, l.page)})`));
+      x.added.forEach(l => out.push(`- 추가: ${l.text} (${l.doc.docType} ${docLoc(l.doc, l.page)})`));
       if (!x.changed.length && !x.removed.length && !x.added.length) out.push("- 바뀐 줄 없음");
     });
   }
@@ -189,9 +190,9 @@ function compareCsv() {
     rows.push([], ["문서", "구분", `${results[0].start} 판`, `${results[1].start} 판`, "근거"]);
     diff.forEach(x => {
       if (x.missing) return rows.push([x.type, "비교 불가", x.missing]);
-      x.changed.forEach(c => rows.push([x.type, "변경", c.from.text, c.to.text, `p.${c.from.page} → p.${c.to.page}`]));
-      x.removed.forEach(l => rows.push([x.type, "삭제", l.text, "", `p.${l.page}`]));
-      x.added.forEach(l => rows.push([x.type, "추가", "", l.text, `p.${l.page}`]));
+      x.changed.forEach(c => rows.push([x.type, "변경", c.from.text, c.to.text, `${docLoc(c.from.doc, c.from.page)} → ${docLoc(c.to.doc, c.to.page)}`]));
+      x.removed.forEach(l => rows.push([x.type, "삭제", l.text, "", docLoc(l.doc, l.page)]));
+      x.added.forEach(l => rows.push([x.type, "추가", "", l.text, docLoc(l.doc, l.page)]));
     });
   }
   return "﻿" + rows.map(r => r.map(q).join(",")).join("\r\n");

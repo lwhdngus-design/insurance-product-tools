@@ -42,6 +42,10 @@ jobs:
           done
       - name: Check rate table page retrieval
         run: python3 product-search/tests/test_rate_pages.py
+      - name: Check native Word tables and changed-document indexing
+        run: python3 product-search/tests/test_word_docs.py
+      - name: Check Word file names and date precision
+        run: node product-search/tests/test_word_paths.cjs
       - name: Check public document transfer download
         run: python3 tools/documents-transfer/test_documents_transfer.py
       - name: Upload public site

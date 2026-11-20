@@ -13,6 +13,8 @@ OUT = APP / "main-logic.txt"
 # 실행 순서대로: 로컬 실행기(서버) → 데이터 빌드 → 화면 로직
 FILES = [
     ("serve.py", "로컬 실행기 · 검색 색인(SQLite) · 문장 질문 검색 · 로컬 AI 연결"),
+    ("word_docs.py", "Word/HWPX 직접 읽기 · 변경 확인 · 원문 미리보기 캐시"),
+    ("word-preview.ps1", "Windows Microsoft Word 미리보기 PDF 생성"),
     ("build-data.py", "가상 데이터(CSV) → data.js 변환"),
     ("index.html", "기본 검색 로직 (<script> 부분만)"),
     ("pdf-docs.js", "기초서류 PDF 읽기 · 판매일자·판매상태 · 문서 검색"),

@@ -564,7 +564,7 @@
 
 <div class="wrap page" id="viewConnect" data-page="connect" hidden>
   <h1 class="page-title">기초서류 연결</h1>
-  <p class="page-desc">공시실에서 내려받은 사업방법서·상품요약서·약관 PDF 폴더를 연결합니다. 문서는 내 PC 안에서만 읽고, 외부로는 아무것도 보내지 않습니다.</p>
+  <p class="page-desc">사업방법서·상품요약서·약관의 Word·PDF 혼합 폴더를 연결합니다. 산출방법서·요율확인의뢰서는 상품별 원본 링크로 표시하며 본문 분석에서 제외합니다. 문서는 내 PC 안에서만 읽습니다.</p>
   <div class="cgrid">
     <section class="cbox">
       <h2>현재 연결 상태</h2>
@@ -577,7 +577,8 @@
       </tbody></table>
       <div class="buttons cact">
         <button type="button" id="reloadDocsBtn" class="primary" hidden>새로고침 (추가·수정된 파일 다시 읽기)</button>
-        <label class="folder-btn">폴더 선택<input type="file" id="folderInput" webkitdirectory multiple hidden /></label>
+        <button type="button" id="changeDocsFolderBtn" hidden>연결 폴더 변경</button>
+        <label class="folder-btn" id="folderPicker">폴더 선택<input type="file" id="folderInput" webkitdirectory multiple hidden /></label>
       </div>
       <p class="note" id="docsNote">사업방법서·약관·상품요약서 폴더를 선택하면 브라우저가 PC 안에서 본문을 읽어 검색에 포함합니다.
         파일은 어디에도 업로드·저장되지 않으며, 창을 닫으면 사라집니다.</p>
@@ -585,9 +586,9 @@
     <section class="cbox">
       <h2>연결 방법</h2>
       <ol class="steps">
-        <li><b>start.bat</b> 더블클릭 — 처음 한 번 PDF 폴더 경로를 물어보고, 다음부터는 그 폴더를 자동으로 연결합니다.</li>
-        <li><b>change-folder.bat</b> — 다른 폴더로 바꿀 때. 폴더별 색인은 따로 보관되어 예전 폴더로 돌아가도 다시 읽지 않습니다.</li>
-        <li><b>새로고침</b> — 폴더에 PDF를 추가·수정한 뒤 누르면 바뀐 파일만 다시 읽습니다.</li>
+        <li><b>start-search.bat</b> 더블클릭 — 처음 한 번 Word·PDF 기초서류 폴더 경로를 물어보고, 다음부터는 그 폴더를 자동으로 연결합니다.</li>
+        <li><b>연결 폴더 변경</b> — 이 화면에서 다른 원본 폴더의 경로를 입력합니다. <code>change-folder.bat</code>도 사용할 수 있습니다.</li>
+        <li><b>새로고침</b> — 원본 Word·PDF를 추가·수정한 뒤 누르면 바뀐 파일만 다시 읽습니다. Word는 내용 해시도 확인합니다.</li>
         <li><b>폴더 선택</b> — index.html을 더블클릭해 연 경우에만 사용(창을 닫으면 다시 선택).</li>
       </ol>
       <p class="note">공시실 서류를 아직 받지 않았다면 아래 <a href="#downloadGuide" class="jump">공시실 서류 내려받기</a>를 먼저 따라 합니다.</p>
@@ -600,6 +601,8 @@
     └─ 2014 / 2014.02.03 / (무)OO연금보험 / … .pdf</pre>
       <p class="note"><b>판매상태</b>는 판매중/판매중지 폴더를 기준으로 합니다. 판매중 폴더 상품도 같은 상품의 더 최근 판매일자가 있으면 이전 판매일자는 판매종료로 봅니다. 판매여부 폴더가 없으면 판매일자로 추정하고 상품 목록에 '추정'으로 표시합니다.</p>
       <p class="note">파일명에 상품명과 문서유형(사업방법서·상품요약서·약관)이 들어 있으면 상품별로 자동으로 묶입니다(파일명에 상품명이 없으면 상품명 폴더 이름). "계약자용"은 같은 상품으로 봅니다.</p>
+      <p class="note"><b>Word 사용:</b> DOCX·HWPX 본문은 직접 읽습니다. DOC 및 Word 그림 보기는 Windows의 Microsoft Word 또는 LibreOffice, HWP 읽기·그림 보기는 LibreOffice나 PDF 사본이 필요합니다. 그림이 필요할 때만 내 PC에 변환 캐시를 만들며 원본은 보존합니다. 변환 전 근거는 '구간', 변환 후는 실제 PDF 쪽수입니다. 산출방법서·요율확인의뢰서의 ↗ 링크는 PC 연결 프로그램으로 엽니다.</p>
+      <p class="note">파일·폴더의 날짜는 판매일자 후보입니다. 판매상태 '추정'은 공시실에서 확인된 정보가 아닙니다. 설치 글꼴·문서 프로그램에 따라 Word 미리보기 페이지 배치가 달라질 수 있으므로 원본을 함께 확인하세요.</p>
     </section>
   </div>
 
@@ -699,6 +702,7 @@ python hanalife_download.py                ← 판매 + 판매중지 전체</pre
       <div class="proc-no">STEP 1</div>
       <div class="proc-body">
         <h2>통합 앱 받기</h2>
+        <p class="note">Word 실습: 내부망 원본 폴더를 <code>start-search.bat</code>으로 연결 → DOCX 본문·표 직접 색인 → AI 질문·상품 분석·비교 → 원문 그림 보기가 필요하면 Word/LibreOffice 미리보기를 생성합니다. 산출방법서·요율확인의뢰서는 원본 링크 전용입니다. 실제 내부 문서는 공개 데모에 포함하지 않습니다.</p>
         <p class="note">기초서류 내부망 전송: <a href="https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/documents-transfer-500MB.zip">500MB 미만 ZIP 도구 받기</a> → 압축을 풀고 <code>1_pack_490MB.bat</code> 실행 → <code>product-documents</code> 폴더 선택. 원본 옆에 최대 490MB씩 저장하며, 내부망에서 생성된 파일들을 같은 폴더에 모아 <code>2_restore.bat</code>으로 복원합니다. Python 3.9 이상이 필요합니다.</p>
         <p><b>Insurance Product Tools</b>에는 상품 검색·분석 앱과 하나생명 공시실 다운로드 도구가 함께 들어 있습니다.
           아래 <b>ZIP 바로 받기</b>로 내려받아 압축을 풀고, 최상위 폴더의 실행파일을 사용하세요.</p>

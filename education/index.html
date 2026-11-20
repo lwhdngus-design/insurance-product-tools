@@ -412,6 +412,14 @@ python hanalife_download.py</pre></li>
     </div>
 
     <div class="feature">
+      <h3>Word 원본 연결·분석·그림 보기 · 2026.11.20 추가</h3>
+      <p>내부망의 Word·PDF 혼합 폴더를 <code>start-search.bat</code>으로 연결합니다. DOCX·HWPX는 본문과 표를 직접 읽고, 추가·수정된 파일은 새로고침으로 다시 색인합니다. DOCX 파일명의 수정 표시를 상품명에서 분리해 같은 상품의 서류를 함께 묶습니다.</p>
+      <p><b>산출방법서·요율확인의뢰서</b>는 상품별 원본 링크 전용입니다. 해당 내용은 검색·질문·분석의 근거로 사용하지 않습니다. ↗를 누르면 PC의 연결 프로그램으로 원본을 엽니다.</p>
+      <p>Word 그림 보기는 필요할 때 Windows Microsoft Word 또는 LibreOffice로 PDF 캐시를 생성해 제공합니다. 변환 전에는 근거를 '구간', 변환 후에는 PDF의 실제 쪽수로 표시합니다. DOC 읽기에는 변환 프로그램, HWP 읽기·그림 보기에는 LibreOffice 또는 PDF 사본이 필요합니다. 원본 문서는 보존하며 실제 내부 문서는 공개 데모에 포함하지 않습니다. 설치 글꼴·변환기에 따라 페이지 배치는 달라질 수 있습니다.</p>
+      <p>파일·폴더 날짜와 '판매중 추정'은 공시실 확인 정보가 아닙니다. 실제 판매상태는 공시실 정보와 별도로 대조해야 합니다. 기존 교육 화면·시험 기록은 당시 결과를 유지합니다.</p>
+    </div>
+
+    <div class="feature">
       <h3>기초서류 내부망 전송 · 2026.11.20 추가</h3>
       <p><a href="https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/documents-transfer-500MB.zip">전송 도구 ZIP 직접 받기</a> → 압축을 풀고 <code>1_pack_490MB.bat</code> 실행 → 원본 <code>product-documents</code> 폴더 선택. 원본 옆의 새 폴더에 최대 490MB ZIP으로 나눠 저장하며 원본 파일을 보존합니다.</p>
       <p>모든 ZIP과 함께 생성된 복원 파일들을 내부망의 같은 폴더로 옮긴 뒤 <code>2_restore.bat</code>을 실행합니다. 한도보다 큰 단일 파일도 분할·복원하며 ZIP 및 복원 파일의 해시를 확인합니다. Python 3.9 이상만 필요하고, 압축·복원 중 외부 인터넷이나 추가 패키지는 사용하지 않습니다. 실제 상품 검색에는 복원한 기초서류 폴더를 연결합니다.</p>

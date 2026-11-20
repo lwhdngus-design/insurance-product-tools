@@ -17,8 +17,13 @@ class EmbeddedCMapReaderFactory {
 const DOCS = []; // { file, path, name, docType, productName, productKey, start, end, pages: [text], error }
 
 // ---------- 경로·파일명 해석 ----------
-const DOC_TYPES = ["사업방법서", "산출방법서", "상품요약서", "약관"];
+const DOC_TYPES = ["요율확인의뢰서", "사업방법서", "산출방법서", "상품요약서", "약관"];
 const docTypeOf = name => DOC_TYPES.find(t => name.includes(t)) || "기타";
+const LINK_DOC_TYPES = ["산출방법서", "요율확인의뢰서"];
+const isLinkOnly = d => LINK_DOC_TYPES.includes(d.docType);
+const isWord = d => /\.(docx?|hwpx?)$/i.test(d.name);
+const docLoc = (d, page) => d.textKind === "section" ? `구간 ${page}` : `p.${page}`;
+const refAttrs = (d, page, anchor = "") => `data-open="${DOCS.indexOf(d)}" data-page="${page}" data-unit="${d.textKind === "section" ? "section" : "page"}"${anchor && d.textKind === "section" ? ` data-anchor="${esc(anchor.slice(0, 600))}"` : ""}`;
 
 const pad = n => String(n).padStart(2, "0");
 function validDate(y, m, d) {
@@ -31,16 +36,16 @@ function validDate(y, m, d) {
 function findDates(str) {
   const found = [];
   const patterns = [
-    [/(?<!\d)((?:19|20)\d{2})\s*[.\-_/년]\s*(\d{1,2})\s*(?:[.\-_/월]\s*(\d{1,2})\s*일?)?(?!\d)/g, m => validDate(m[1], m[2], m[3])],
-    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate(m[1], m[2], m[3])],
-    [/(?<!\d)(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate("20" + m[1], m[2], m[3])],
-    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(?!\d)/g, m => validDate(m[1], m[2])],
+    [/(?<!\d)((?:19|20)\d{2})\s*[.\-_/년]\s*(\d{1,2})\s*(?:[.\-_/월]\s*(\d{1,2})\s*일?)?(?!\d)/g, m => validDate(m[1], m[2], m[3]), m => !!m[3]],
+    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate(m[1], m[2], m[3]), () => true],
+    [/(?<!\d)(\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)/g, m => validDate("20" + m[1], m[2], m[3]), () => true],
+    [/(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(?!\d)/g, m => validDate(m[1], m[2]), () => false],
   ];
-  for (const [re, toDate] of patterns) {
+  for (const [re, toDate, hasDay] of patterns) {
     for (const m of str.matchAll(re)) {
       const date = toDate(m);
       const s = m.index, e = m.index + m[0].length;
-      if (date && !found.some(f => s < f.e && e > f.s)) found.push({ s, e, date, text: m[0] });
+      if (date && !found.some(f => s < f.e && e > f.s)) found.push({ s, e, date, text: m[0], hasDay: hasDay(m) });
     }
   }
   return found.sort((a, b) => a.s - b.s);
@@ -67,9 +72,13 @@ function docSaleStatus(d) {
 
 function saleDatesOf(path) {
   const parts = path.split("/");
+  const fileDates = /\.(docx?|hwpx?)$/i.test(path) ? findDates(parts[parts.length - 1]).filter(d => d.hasDay) : [];
   const candidates = [...parts.slice(0, -1).reverse(), parts[parts.length - 1]];
   for (const seg of candidates) {
     const ds = findDates(seg);
+    // Word collections often have a month or annual range outside a precise file date.
+    // Preserve the existing explicit day-folder rule while avoiding a fabricated month-first day.
+    if (ds.length && fileDates.length && (ds.length > 1 || !ds[0].hasDay)) return { start: fileDates[0].date, end: "", explicitEnd: false };
     if (ds.length) return { start: ds[0].date, end: ds.length > 1 ? ds[1].date : "", explicitEnd: ds.length > 1 };
   }
   return { start: "", end: "", explicitEnd: false };
@@ -80,9 +89,12 @@ function saleDatesOf(path) {
 const DOC_WORDS = ["보험약관", "보통약관", "특별약관", "기본약관", "특약약관", ...DOC_TYPES];
 
 function productNameOf(fileName) {
-  let s = fileName.replace(/\.pdf$/i, "");
+  let s = fileName.replace(/\.(pdf|docx?|hwpx?)$/i, "");
   // "[보험약관] (무)…", "【사업방법서】…" 같은 대괄호 머리표 제거 (상품명의 둥근 괄호 "(무)"는 유지)
   s = s.replace(/[\[【〔［][^\]】〕］]*[\]】〕］]/g, " ");
+  // Internal Word files put revision labels after the document type. They are not product names.
+  const typeAt = DOC_WORDS.map(t => s.indexOf(t)).filter(i => i > 0).sort((a, b) => a - b)[0];
+  if (typeAt !== undefined && /[가-힣]{2}/.test(s.slice(0, typeAt))) s = s.slice(0, typeAt);
   for (const d of findDates(s).reverse()) s = s.slice(0, d.s) + " " + s.slice(d.e);
   for (const t of DOC_WORDS) s = s.split(t).join(" ");
   // "(계약자용)", "_계약자용" 등은 같은 상품으로 봄 → 상품명에서 제외
@@ -149,12 +161,25 @@ function makeDoc(path, extra) {
   const name = path.split("/").pop();
   const productName = productNameFromPath(path);
   return { path, name, docType: docTypeOf(name), productName, productKey: productKeyFrom(productName),
-           ...saleDatesOf(path), saleFolder: saleFolderOf(path), pages: [], error: "", ...extra };
+           ...saleDatesOf(path), saleFolder: saleFolderOf(path), format: name.split(".").pop().toLowerCase(), textKind: /\.(docx|hwpx)$/i.test(name) ? "section" : "page", pages: [], error: "", ...extra };
 }
 
 async function readPages(doc, getBytes) {
   try {
-    doc.pages = await extractPages(await getBytes());
+    if (isLinkOnly(doc)) { doc.pages = []; doc.textKind = "link"; doc.error = ""; return; }
+    if (isWord(doc)) {
+      if (!SERVER_MODE) throw new Error("Word/한글 본문은 start-search.bat으로 실행한 PC 앱에서 읽습니다.");
+      if (["docx", "hwpx"].includes(doc.format)) {
+        const data = await api("api/read_document", { path: doc.path });
+        doc.pages = data.pages;
+        doc.textKind = data.text_kind;
+      } else {
+        const result = await api("api/preview", { path: doc.path });
+        doc.previewUrl = result.url; doc.renderer = result.renderer;
+        doc.pages = await extractPages(new Uint8Array(await (await fetch(result.url)).arrayBuffer()));
+        doc.textKind = "page";
+      }
+    } else doc.pages = await extractPages(await getBytes());
     if (!doc.pages.join("").trim()) doc.error = "본문 텍스트 없음 (스캔 이미지 PDF일 수 있음)";
   } catch (e) {
     doc.error = "읽기 실패: " + (e && e.message ? e.message : e);
@@ -183,13 +208,15 @@ function finishLoading(label) {
   setTimeout(() => { $("docsProgress").hidden = true; }, 600);
   const failed = DOCS.filter(d => d.error).length, noDate = DOCS.filter(d => !d.start).length;
   $("docsDot").classList.toggle("ok", DOCS.length > 0);
-  $("docsStatus").textContent = `${label} — PDF ${DOCS.length}개` +
+  const wordCount = DOCS.filter(isWord).length;
+  $("docsStatus").textContent = `${label} — ${wordCount ? `문서 ${DOCS.length}개 (Word·한글 ${wordCount}개)` : `PDF ${DOCS.length}개`}` +
     (failed ? ` (본문 못 읽음 ${failed}개)` : "") + (noDate ? ` · 판매일자 인식 못함 ${noDate}개` : "");
   renderAll();
 }
 
 function resetDocs() {
   movedDupCount = 0;
+  if (typeof SPEC_CACHE !== "undefined") SPEC_CACHE.clear();
   DOCS.forEach(d => d.url && d.url.startsWith("blob:") && URL.revokeObjectURL(d.url));
   DOCS.length = 0;
 }
@@ -202,10 +229,10 @@ const progress = (i, n, path) => {
 
 // 방법 1) [폴더 선택] — 파일을 매번 다시 선택 (index.html을 더블클릭해서 연 경우)
 async function loadFolder(fileList) {
-  const files = [...fileList].filter(f => /\.pdf$/i.test(f.name));
+  const files = [...fileList].filter(f => /\.(pdf|docx?|hwpx?)$/i.test(f.name) && !f.name.startsWith("~$"));
   resetDocs();
   if (!files.length) {
-    $("docsStatus").textContent = "선택한 폴더에 PDF 파일이 없습니다.";
+    $("docsStatus").textContent = "선택한 폴더에 지원하는 기초서류가 없습니다.";
     renderAll();
     return;
   }
@@ -255,7 +282,7 @@ async function loadFromServer() {
   $("docsFolder").textContent = folder;
   for (const f of files) {
     const url = "docs/" + f.path.split("/").map(encodeURIComponent).join("/");
-    DOCS.push(makeDoc(f.path, { url, id: f.id, size: f.size, mtime: f.mtime, indexed: f.indexed,
+    DOCS.push(makeDoc(f.path, { url, id: f.id, size: f.size, mtime: f.mtime, fingerprint: f.fingerprint, textKind: f.text_kind, indexed: f.indexed,
                                 error: f.error || "", features: f.features || {} }));
   }
   const todo = DOCS.filter(d => !d.indexed);
@@ -264,6 +291,7 @@ async function loadFromServer() {
   // 새 파일·수정된 파일만 읽어서 색인 (중간에 창을 닫아도 다음에 이어서 진행)
   indexing = true;
   $("reloadDocsBtn").disabled = true;
+  $("changeDocsFolderBtn").disabled = true;
   const t0 = Date.now();
   try {
     for (let i = 0; i < todo.length; i++) {
@@ -274,13 +302,14 @@ async function loadFromServer() {
         $("docsStatus").textContent += ` · 남은 시간 약 ${left}분`;
       }
       await readPages(d, async () => new Uint8Array(await (await fetch(d.url)).arrayBuffer()));
-      const r = await api("api/index", { path: d.path, size: d.size, mtime: d.mtime, pages: d.pages, error: d.error });
+      const r = await saveDocIndex(d);
       Object.assign(d, { id: r.id, features: r.features, indexed: true, pages: [], pagesLoaded: false });
       if (i % 25 === 24) renderAll(); // 색인된 문서부터 바로 검색 가능
     }
   } finally {
     indexing = false;
     $("reloadDocsBtn").disabled = false;
+    $("changeDocsFolderBtn").disabled = false;
   }
   finishLoading(`자동 연결: ${root} (새로 색인 ${todo.length}개)`);
 }
@@ -289,6 +318,8 @@ if (SERVER_MODE) {
   $("serverMode").hidden = false;
   $("noFolder").hidden = true;
   $("reloadDocsBtn").hidden = false;
+  $("changeDocsFolderBtn").hidden = false;
+  $("folderPicker").hidden = true;
   $("docsNote").textContent = "start.bat으로 실행 중 — 지정 폴더를 자동으로 읽어 내 PC의 검색 색인(앱 폴더 .docs-cache)에 저장합니다. " +
     "다음 실행부터는 새로 추가·수정된 파일만 읽습니다. 외부로는 아무것도 전송되지 않습니다.";
   const run = () => loadFromServer().catch(err => {
@@ -298,6 +329,12 @@ if (SERVER_MODE) {
       : "자동 연결 실패: " + err.message;
   });
   $("reloadDocsBtn").addEventListener("click", run);
+  $("changeDocsFolderBtn").addEventListener("click", async () => {
+    const folder = window.prompt("연결할 Word·PDF 원본 폴더 경로를 입력하세요.", $("docsFolder").textContent);
+    if (!folder || !folder.trim()) return;
+    try { await api("api/set_folder", { folder }); await run(); }
+    catch (err) { $("docsStatus").textContent = "폴더 변경 실패: " + err.message; }
+  });
   run();
 }
 
@@ -329,6 +366,7 @@ if (DEMO_MODE) {
 // 판매기간·분류·판매상태 조건 (키워드 검색과 질문 검색이 함께 사용)
 const MAIN_DOC_TYPES = ["사업방법서", "상품요약서", "약관"];
 function docMatchesFilters(d, { from, to, category, status, docType }) {
+  if (isLinkOnly(d)) return false; // Product links only: never use these contents as search/analysis evidence.
   if (docType && (docType === "기타" ? MAIN_DOC_TYPES.includes(d.docType) : d.docType !== docType)) return false;
   // 판매기간 겹침: 판매개시일 <= To AND (종료일 빈값 OR 종료일 >= From). 판매일자를 모르면 기간 검색에서 제외
   if ((from || to) && !(d.start && (!to || d.start <= to) && (!from || !d.end || d.end >= from))) return false;
@@ -433,11 +471,11 @@ async function renderDocs(keepPage = false) {
     return;
   }
   $("docsResults").innerHTML = pageRows.map(({ doc: d, terms }) => {
-    let snipHtml = "", firstPage = 1;
+    let snipHtml = "", firstPage = 1, anchor = "";
     if (terms.length) {
       const list = snips.get(d) || [];
-      if (list.length) firstPage = list[0].page;
-      snipHtml = list.map(s => `<p class="snip"><span class="pg">p.${s.page}</span>${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`).join("")
+      if (list.length) { firstPage = list[0].page; anchor = list[0].before + list[0].hit + list[0].after; }
+      snipHtml = list.map(s => `<p class="snip"><span class="pg">${docLoc(d, s.page)}</span>${s.lead ? "…" : ""}${esc(s.before)}<mark>${esc(s.hit)}</mark>${esc(s.after)}${s.tail ? "…" : ""}</p>`).join("")
         || `<p class="snip note">파일 경로에서 일치</p>`;
     }
     if (d.error) snipHtml += `<p class="warn">${esc(d.error)}</p>`;
@@ -447,7 +485,7 @@ async function renderDocs(keepPage = false) {
       <td>${esc(d.docType)}</td>
       <td>${esc(d.productName || d.name)}<div class="path">${esc(d.path)}</div></td>
       <td>${snipHtml}</td>
-      <td class="actions"><button type="button" data-open="${DOCS.indexOf(d)}" data-page="${firstPage}">열기</button>
+      <td class="actions"><button type="button" ${refAttrs(d, firstPage, anchor)}>열기</button>
         <button type="button" data-analyze="${esc(productKeyOf(d))}" data-start="${esc(d.start)}">분석</button></td>
     </tr>`;
   }).join("");
@@ -478,10 +516,14 @@ function docLinksHtml(docs, cls = "doclinks") {
   for (const t of MAIN_DOC_TYPES) {
     const list = docs.filter(d => d.docType === t);
     if (!list.length) { parts.push(`<span class="miss">${t} 없음</span>`); continue; }
-    parts.push(list.map((d, i) => `<a href="#" data-open="${DOCS.indexOf(d)}" data-page="1" title="${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""}</a>`).join(" "));
+    parts.push(list.map((d, i) => `<a href="#" ${refAttrs(d, 1)} title="${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""}</a>`).join(" "));
   }
-  docs.filter(d => !MAIN_DOC_TYPES.includes(d.docType))
-    .forEach(d => parts.push(`<a href="#" data-open="${DOCS.indexOf(d)}" data-page="1" title="${esc(d.path)}">${esc(d.docType === "기타" ? d.name : d.docType)}</a>`));
+  for (const t of LINK_DOC_TYPES) {
+    const list = docs.filter(d => d.docType === t);
+    parts.push(list.length ? list.map((d, i) => `<a href="#" data-original="${DOCS.indexOf(d)}" title="원본을 PC 연결 프로그램으로 열기: ${esc(d.path)}">${t}${list.length > 1 ? ` (${i + 1})` : ""} ↗</a>`).join(" ") : `<span class="miss">${t} 없음</span>`);
+  }
+  docs.filter(d => !MAIN_DOC_TYPES.includes(d.docType) && !isLinkOnly(d))
+    .forEach(d => parts.push(`<a href="#" ${refAttrs(d, 1)} title="${esc(d.path)}">${esc(d.docType === "기타" ? d.name : d.docType)}</a>`));
   return `<span class="${cls}">${parts.join("")}</span>`;
 }
 
@@ -489,18 +531,87 @@ function docLinksHtml(docs, cls = "doclinks") {
 const productKeyOf = d => d.productKey || norm(d.name);
 
 // PDF 열기: 메모리의 파일을 새 탭으로 (일치한 페이지로 이동). 결과·답변·분석 화면 공통
-function openDoc(index, page) {
+async function openDoc(index, page, unit = "page", anchor = "") {
   const d = DOCS[index];
+  if (!d) return;
+  if (isLinkOnly(d)) return openOriginal(d);
+  if (isWord(d)) {
+    $("modalTitle").textContent = `${d.productName || d.name} · ${d.docType} 미리보기`;
+    $("modalBody").style.gridTemplateColumns = "minmax(300px, 1fr)";
+    $("modalBody").innerHTML = `<p class="note">Word 원문 미리보기를 준비하는 중입니다. 처음에는 문서 프로그램으로 변환하므로 시간이 걸릴 수 있습니다.</p>`;
+    $("imgModal").hidden = false;
+    try {
+      await ensurePages([d]);
+      const nativeText = unit === "section" ? anchor || (d.nativePages || d.pages)[(+page || 1) - 1] || "" : "";
+      await ensureWordPreview(d);
+      if (nativeText) {
+        const candidates = nativeText.split("\n").map(t => norm(t).replace(/\|/g, "")).filter(s => s.length >= 15).slice(0, 30);
+        let found = -1, multiple = false;
+        for (const candidate of candidates) {
+          for (const length of [80, 40, 24]) {
+            const key = candidate.slice(0, length), hits = d.pages.map((p, i) => norm(p).includes(key) ? i : -1).filter(i => i >= 0);
+            if (hits.length) { found = hits[0]; multiple = hits.length > 1; break; }
+          }
+          if (found >= 0) break;
+        }
+        page = found >= 0 ? found + 1 : 1;
+        d.locationNotice = found >= 0 ? multiple ? "같은 근거 문구가 여러 쪽에 있어 첫 일치 쪽을 엽니다." : "근거 문구를 변환된 PDF 쪽으로 연결했습니다." : "해당 구간의 실제 쪽을 확정하지 못해 첫 쪽을 엽니다. 원문에서 확인해 주세요.";
+      }
+      return showDocPage(d, +page || 1);
+    } catch (err) {
+      $("modalBody").innerHTML = `<div><p class="warn">미리보기를 만들지 못했습니다: ${esc(err.message)}</p><button type="button" data-original="${DOCS.indexOf(d)}">원본 ${d.format.toUpperCase()} 열기</button><p class="note">DOCX 본문 검색은 문서 변환 없이 사용할 수 있습니다.</p></div>`;
+      return;
+    }
+  }
   if (DEMO_MODE) { showDocPage(d, +page || 1); return; } // 웹 데모는 새 창을 못 열어 화면 안에 그 쪽을 그림으로 보여 줌
   d.url ||= URL.createObjectURL(d.file); // 서버 모드는 처음부터 docs/... 주소가 있음
   window.open(`${d.url}#page=${page || 1}`, "_blank");
 }
 document.addEventListener("click", e => {
+  const original = e.target.closest("[data-original]");
+  if (original) { e.preventDefault(); openOriginal(DOCS[+original.dataset.original]).catch(err => demoNotice(err.message)); return; }
   const btn = e.target.closest("button[data-open], a[data-open]");
   if (!btn) return;
   e.preventDefault();
-  openDoc(+btn.dataset.open, btn.dataset.page);
+  openDoc(+btn.dataset.open, btn.dataset.page, btn.dataset.unit, btn.dataset.anchor || "");
 });
+
+async function openOriginal(d) {
+  if (SERVER_MODE) {
+    const result = await api("api/open_original", { path: d.path });
+    if (result.opened) return;
+  }
+  d.url ||= URL.createObjectURL(d.file);
+  const a = document.createElement("a"); a.href = d.url; a.download = d.name; a.click();
+}
+
+const saveDocIndex = d => api("api/index", { path: d.path, size: d.size, mtime: d.mtime, fingerprint: d.fingerprint || "", reader_version: isWord(d) ? "office-text-1" : "", text_kind: d.textKind, pages: d.pages, error: d.error });
+
+async function ensureWordPreview(d) {
+  if (!isWord(d) || isLinkOnly(d)) return;
+  if (d.previewUrl && d.textKind === "page") return;
+  if (d.previewTask) return d.previewTask;
+  d.previewTask = (async () => {
+    await ensurePages([d]);
+    const result = await api("api/preview", { path: d.path });
+    if (result.fingerprint !== d.fingerprint) throw new Error("원본이 변경됐습니다. 기초서류 새로고침 후 다시 열어 주세요.");
+    const pages = await extractPages(new Uint8Array(await (await fetch(result.url)).arrayBuffer()));
+    const saved = await saveDocIndex({ ...d, pages, textKind: "page", error: "" });
+    d.nativePages ||= d.textKind === "section" ? d.pages : [];
+    Object.assign(d, { pages, pagesLoaded: true, textKind: "page", previewUrl: result.url, renderer: result.renderer, error: "", id: saved.id, features: saved.features });
+    for (const key of ["_lines", "_sections", "_tableSegs", "_sectionImgs"]) delete d[key];
+    if (typeof SPEC_CACHE !== "undefined") SPEC_CACHE.clear();
+    if (typeof CATALOG !== "undefined") CATALOG = buildCatalog();
+  })();
+  try { await d.previewTask; } finally { d.previewTask = null; }
+}
+
+async function prepareWordPreviews(docs) {
+  for (const d of docs.filter(x => isWord(x) && !isLinkOnly(x) && !x.error)) {
+    try { await ensureWordPreview(d); d.previewError = ""; }
+    catch (err) { d.previewError = err.message; }
+  }
+}
 
 $("folderInput").addEventListener("change", e => {
   loadFolder(e.target.files).catch(err => { $("docsStatus").textContent = "폴더 읽기 실패: " + err.message; });
