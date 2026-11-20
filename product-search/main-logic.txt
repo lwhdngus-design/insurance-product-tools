@@ -1935,7 +1935,7 @@ function regexSnippet(pageText, re) {
 }
 
 // 문서가 특징을 가졌는지: 서버 모드는 색인 때 미리 계산한 태그, 파일 모드는 본문에서 바로 확인
-const docHasFeature = (d, f) => (SERVER_MODE ? !!(d.features && d.features[f.id]) : featureMatches(f, d.searchText));
+const docHasFeature = (d, f) => !isLinkOnly(d) && (SERVER_MODE ? !!(d.features && d.features[f.id]) : featureMatches(f, d.searchText));
 
 // 특징 근거 문맥 (패턴별 첫 페이지)
 function featureEvidence(d, f) {
