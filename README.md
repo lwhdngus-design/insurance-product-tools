@@ -30,6 +30,10 @@ PC는 인터넷 연결 후 최상위 `update.bat` 또는 기존 `product-search\
 
 ## Windows에서 사용하기
 
+[개발·시험 도구를 제외한 실행용 ZIP](https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/insurance-product-tools-runtime.zip)도 제공합니다. `.cjs` 시험 파일과 공시실 다운로드·분할압축·빌드 도구를 제외하고, 필수 Python 소스 `serve.py`, `word_docs.py`와 Word 미리보기용 `.ps1`은 본래 확장자로 유지합니다. ZIP 안의 `FILES.csv`에 전체 파일·용도·해시가 있습니다. 회사에서 `.py`를 차단하면 이 ZIP 역시 반입 허용이 확인되기 전에는 사용할 수 없습니다. 회사에서 승인한 반입/설치 방식에 맞춰 배포해야 합니다.
+
+ZIP을 열기 전 [파일 구성표 CSV](https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/insurance-product-tools-runtime-files.csv)로 필요한 확장자·용도를 검토할 수 있습니다.
+
 Python 3.9 이상과 Chrome 또는 Edge를 준비합니다. Python 설치 시 PATH 추가를 선택합니다.
 
 1. 처음에는 `start-sample.bat`을 실행해 가상 상품 20개·PDF 82개가 열리는지 확인합니다.
