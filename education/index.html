@@ -412,6 +412,12 @@ python hanalife_download.py</pre></li>
     </div>
 
     <div class="feature">
+      <h3>기초서류 내부망 전송 · 2026.11.20 추가</h3>
+      <p><a href="https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/documents-transfer-500MB.zip">전송 도구 ZIP 직접 받기</a> → 압축을 풀고 <code>1_pack_490MB.bat</code> 실행 → 원본 <code>product-documents</code> 폴더 선택. 원본 옆의 새 폴더에 최대 490MB ZIP으로 나눠 저장하며 원본 파일을 보존합니다.</p>
+      <p>모든 ZIP과 함께 생성된 복원 파일들을 내부망의 같은 폴더로 옮긴 뒤 <code>2_restore.bat</code>을 실행합니다. 한도보다 큰 단일 파일도 분할·복원하며 ZIP 및 복원 파일의 해시를 확인합니다. Python 3.9 이상만 필요하고, 압축·복원 중 외부 인터넷이나 추가 패키지는 사용하지 않습니다. 실제 상품 검색에는 복원한 기초서류 폴더를 연결합니다.</p>
+    </div>
+
+    <div class="feature">
       <h3>AI 질문: 기간별 이율 찾기 · 2026.10.27 추가</h3>
       <p>“적용이율을 보험기간별로 별도 적용하는 상품 알려줘. 예를 들어 10년 이내 2%, 10년 이후 3%”처럼 묻습니다. 같은 이율 항목에서 기간 구간과 서로 다른 이율을 함께 확인하고 근거 문장·쪽수를 보여 줍니다. 예시 숫자는 특정 이율 조건으로 제한하지 않습니다.</p>
       <p><b>적용이율과 최저보증이율을 구분</b>합니다. 보증이율을 찾으려면 “최저보증이율이 10년 이내와 이후에 다른 상품”으로 질문하세요. 최신 판부터 이전 판까지 확인하며 이전 판 근거는 별도로 표시합니다. PDF 표 추출과 규칙 판정이므로 원문 확인이 필요하고, 스캔 문서는 글자 추출이 되지 않을 수 있습니다.</p>

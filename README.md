@@ -52,6 +52,12 @@ python hanalife_download.py --out "D:\기존 상품기초서류"
 
 검색 앱은 PDF.js와 Python 기본 라이브러리로 동작합니다. 로컬 AI(Ollama)는 선택 사항이며, 다운로드와 업데이트를 제외한 검색·분석은 오프라인으로 사용할 수 있습니다.
 
+## 기초서류를 500MB 미만으로 나눠 내부망에 옮기기
+
+[전송 도구 ZIP 직접 받기](https://github.com/lwhdngus-design/insurance-product-tools/raw/refs/heads/main/downloads/documents-transfer-500MB.zip)
+
+ZIP을 풀고 `1_pack_490MB.bat`을 실행한 뒤 `product-documents` 폴더를 선택합니다. 원본 옆의 새 폴더에 ZIP 하나당 최대 490MB로 나눠 저장합니다. 원본은 보존하며, 큰 단일 파일은 자동 분할합니다. 생성된 ZIP들과 복원 파일을 내부망의 같은 폴더로 옮기고 `2_restore.bat`을 실행하면 원래 구조로 복원·검증됩니다. 실행·복원에는 Python 3.9 이상이 필요하며 추가 패키지나 인터넷은 사용하지 않습니다. [상세 사용법](tools/documents-transfer/README.txt).
+
 ## 이전 버전에서 옮기기
 
 - `poc-2an`은 `product-search`로 이름이 바뀌었습니다.
