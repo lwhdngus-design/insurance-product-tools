@@ -59,7 +59,6 @@ def build(output=None):
     writer.writerow(["파일", "확장자", "구분", "용도", "바이트", "SHA256"])
     for name, data in sorted(files.items()):
         writer.writerow([name, Path(name).suffix, *role(name), len(data), hashlib.sha256(data).hexdigest()])
-    files["FILES.csv"] = inventory.getvalue().encode("utf-8-sig")
     files["READ_ME.txt"] = '''Insurance Product Tools 실행용 배포 구성
 
 개발·시험·게시 도구, 공시실 다운로드 도구, 분할압축 도구는 제외했습니다.
@@ -81,6 +80,9 @@ Python 설치파일은 포함하지 않습니다.
 Word 그림 보기는 Windows Microsoft Word 또는 LibreOffice가 필요합니다.
 실제 회사 문서, 다운로드 기록, 계정정보는 포함하지 않습니다.
 '''.encode("utf-8-sig")
+    notice = files["READ_ME.txt"]
+    writer.writerow(["READ_ME.txt", ".txt", "안내문", "설치 및 회사 반입 검토 안내", len(notice), hashlib.sha256(notice).hexdigest()])
+    files["FILES.csv"] = inventory.getvalue().encode("utf-8-sig")
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(files.items()):
@@ -100,12 +102,15 @@ def check(output):
         for n in names:
             if n.endswith(".pdf"):
                 assert n.startswith("product-search/sample-기초서류폴더/")
+        listed = set()
         for row in csv.DictReader(io.StringIO(archive.read(PREFIX + "FILES.csv").decode("utf-8-sig"))):
+            listed.add(row["파일"])
             data = archive.read(PREFIX + row["파일"])
             assert hashlib.sha256(data).hexdigest() == row["SHA256"]
             assert len(data) == int(row["바이트"])
             if row["파일"].startswith("product-search/"):
                 assert data == (ROOT / row["파일"]).read_bytes(), "stale runtime file: " + row["파일"]
+        assert listed | {"FILES.csv"} == set(names), "unlisted runtime file"
         assert Path(output).with_name(Path(output).stem + "-files.csv").read_bytes() == archive.read(PREFIX + "FILES.csv"), "stale standalone inventory"
     print(f"PASS: runtime package {len(names)} files, 2 required .py, no .cjs, original extensions and hashes; {Path(output).stat().st_size:,} bytes")
 

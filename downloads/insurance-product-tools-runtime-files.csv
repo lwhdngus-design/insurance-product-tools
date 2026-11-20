@@ -109,3 +109,4 @@ product-search/word-preview.ps1,.ps1,Windows Word 미리보기 시 사용,Micros
 product-search/word_docs.py,.py,필수,Word 본문 읽기·변환 모듈,8295,5405f28d72f2101e993968bce232a1b0c841e1fb3f441d00c4aebf7b9fbd4de9
 start-sample.bat,.bat,실행 시작,Python 서버 실행,90,bece1ca9ec60e3b8af814f353936d55682b0197a591e91735cc7cee2df2d40d1
 start-search.bat,.bat,실행 시작,Python 서버 실행,81,c644487ba81f67d87223ad52c516f344c8a7da865893fa2a5e1a9583bc4eb753
+READ_ME.txt,.txt,안내문,설치 및 회사 반입 검토 안내,1491,6fdd9877fb6ec2e8e2bc243f2416ff849597cc97c9cee59ff8f24070d2dd875f
